@@ -15,10 +15,12 @@
     .full { grid-column:1 / -1; }
     .btn { background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }
     .btn.secondary { background:#374151; }
+    .btn.ghost { background:transparent; color:var(--ink); border:1px solid var(--border); }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
-    .btn-group { display:flex; gap:8px; flex-wrap:wrap; }
+    .btn-group { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     label { font-weight:700; display:block; margin-bottom:6px; }
-    input[type="file"], select, input[type="number"] { padding:8px; border:1px solid var(--border); border-radius:8px; width:100%; }
+    input[type="file"], input[type="text"], select, input[type="number"] { padding:8px; border:1px solid var(--border); border-radius:8px; width:100%; }
+    input[type="text"]{ width:420px; max-width:100%; }
     table { width:100%; border-collapse:collapse; font-size:14px; }
     th, td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
     .muted { color:var(--muted); font-size:12px; }
@@ -50,16 +52,26 @@
       <span id="status" class="muted" style="align-self:center;">CSVを2つ選択してください</span>
     </div>
 
+    <!-- カテゴリ（小分類）マスタ読込：URL or txt -->
+    <div class="btn-group" style="margin-bottom:8px;">
+      <input id="catUrl" type="text" placeholder="カテゴリtxtのURL（raw.githubusercontent.com 推奨）" />
+      <button id="loadCatUrlBtn" class="btn ghost">URLから読込</button>
+      <button id="pickCat" class="btn ghost">カテゴリマスタ取込(txt)</button>
+      <span id="catStatus" class="muted">（任意）小分類コード⇄名称対照表</span>
+    </div>
+
     <!-- 実体の file input（非表示） -->
     <input id="txFile" type="file" accept=".csv" style="display:none;" />
     <input id="lnFile" type="file" accept=".csv" style="display:none;" />
     <input id="pmFile" type="file" accept=".csv" style="display:none;" />
+    <input id="catFile" type="file" accept=".txt" style="display:none;" />
 
     <div class="btn-group" style="margin-top:12px;">
       <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
     </div>
     <p class="muted" style="margin-top:8px;">
-      商品マスタの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用可）/ <code>POS原価</code>
+      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code>  
+      カテゴリtxtは「<em>小分類コード[TAB]小分類名</em>」の行で構成（先頭行にヘッダがあってもOK）。
     </p>
   </div>
 
@@ -98,15 +110,19 @@
   <script>
     // ===== ユーティリティ =====
     const $ = (id) => document.getElementById(id);
-    const txInput = $("txFile"), lnInput = $("lnFile"), pmInput = $("pmFile");
+    const txInput = $("txFile"), lnInput = $("lnFile"), pmInput = $("pmFile"), catInput = $("catFile");
     const runBtn  = $("runBtn"), statusEl= $("status");
+    const catStatus = $("catStatus");
 
     // ボタン→ファイル選択
     $("pickTx").addEventListener("click", ()=> txInput.click());
     $("pickLn").addEventListener("click", ()=> lnInput.click());
     $("pickPm").addEventListener("click", ()=> pmInput.click());
+    $("pickCat").addEventListener("click", ()=> catInput.click());
+    $("loadCatUrlBtn").addEventListener("click", loadCategoryFromUrl);
 
     function normalizeHeader(h){ return String(h||"").replace(/\ufeff/g,"").trim(); }
+
     function parseCSVFile(file){
       return new Promise((resolve,reject)=>{
         Papa.parse(file, {
@@ -122,17 +138,20 @@
         });
       });
     }
+
     function toNumber(x, def=0){
       if (x === null || x === undefined) return def;
       const v = Number(String(x).replace(/,/g,"").trim());
       return isNaN(v) ? def : v;
     }
+
     function parseDate(s){
       if(!s) return null;
-      const t = String(s).trim().replace(/\s+/g," "); // 「2025/8/5  21:53:13」のような空白の重複にも耐性
+      const t = String(s).trim().replace(/\s+/g," "); // 「2025/8/5  21:53:13」など空白の重複に耐性
       const d = new Date(t);
       return isNaN(d.getTime()) ? null : d;
     }
+
     function fmtDate(d){ if(!d) return "-"; const m=d.getMonth()+1, day=d.getDate(); return `${d.getFullYear()}/${m}/${day}`; }
     function minDate(arr){ return arr.reduce((a,r)=>(!a||r.生成時間<a? r.生成時間:a), null); }
     function maxDate(arr){ return arr.reduce((a,r)=>(!a||r.生成時間>a? r.生成時間:a), null); }
@@ -160,11 +179,64 @@
     }
     txInput.addEventListener("change", updateButton);
     lnInput.addEventListener("change", updateButton);
-    pmInput.addEventListener("change", ()=>{/* マスタは任意 */});
+    pmInput.addEventListener("change", ()=>{/* 任意 */});
+    catInput.addEventListener("change", async ()=>{
+      if (catInput.files.length===1) {
+        try {
+          const txt = await catInput.files[0].text();
+          loadCategoryTxt(txt);
+          catStatus.className="muted";
+          catStatus.textContent="カテゴリマスタ（txt）を読み込みました。";
+        } catch(e){
+          catStatus.className="error";
+          catStatus.textContent="カテゴリtxtの読み込みに失敗しました: " + (e?.message||e);
+        }
+      }
+    });
+
+    // ===== カテゴリ対照（小分類） =====
+    let categoryMap = null; // Map<code, name>
+
+    function loadCategoryTxt(text){
+      const lines = String(text).split(/\r?\n/);
+      const map = new Map();
+      for (let i=0;i<lines.length;i++){
+        const raw = lines[i].trim();
+        if (!raw) continue;
+        // タブ優先、なければ空白分割
+        let parts = raw.split("\t");
+        if (parts.length < 2) parts = raw.split(/\s+/);
+        if (parts.length < 2) continue;
+
+        // ヘッダ（例: "小分類名" など）がある行はスキップ
+        const maybeCode = parts[0];
+        const maybeName = parts.slice(1).join(" ");
+        if (!/^\d{3,}$/.test(maybeCode)) continue; // 数字コードでなければスキップ
+
+        map.set(maybeCode, maybeName);
+      }
+      categoryMap = map;
+    }
+
+    async function loadCategoryFromUrl(){
+      const url = $("catUrl").value.trim();
+      if (!url){ catStatus.className="error"; catStatus.textContent="URLを入力してください。"; return; }
+      try{
+        const res = await fetch(url, { mode: "cors" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        loadCategoryTxt(text);
+        catStatus.className="muted";
+        catStatus.textContent = "カテゴリマスタ（URL）を読み込みました。";
+      }catch(e){
+        catStatus.className="error";
+        catStatus.textContent = "カテゴリtxtの取得に失敗しました: " + (e?.message||e);
+      }
+    }
 
     // ===== 状態 =====
     let joined = [];   // JOIN済み明細
-    let masterMap = null; // JAN(=商品コード) -> {商品名, 商品分類, POS原価}
+    let masterMap = null; // JAN -> {商品名, 商品分類(小分類コード), POS原価}
 
     // ===== 取り込み & JOIN & サマリー =====
     async function runImport(){
@@ -206,27 +278,23 @@
           r.商品価格 = toNumber(r.商品価格, 0);
         });
 
-        // 商品マスタ（任意）— 指定列に合わせて取り込み
+        // 商品マスタ（任意）
         masterMap = null;
         if (pmRows.length){
           masterMap = new Map();
           pmRows.forEach(r=>{
-            // キー
             const jan = String(r["商品コード"] ?? r["JANコード"] ?? "").trim();
             if(!jan) return;
-
-            // 商品名は優先順位：商品名 -> 商品名規格
             const nm = String((r["商品名"] ?? r["商品名規格"] ?? "")).trim();
-
             masterMap.set(jan, {
               商品名: nm,
-              商品分類: String(r["商品分類"] ?? "").trim(),
+              商品分類: String(r["商品分類"] ?? "").trim(), // ← 小分類コード想定
               POS原価: toNumber(r["POS原価"], 0)
             });
           });
         }
 
-        // JOIN（キー：CGID + オーダーID）…取引毎の生成時間を採用
+        // JOIN（キー：CGID + オーダーID）…取引毎の生成時間を優先
         const txMap = new Map();
         txRows.forEach(r => txMap.set(`${r.CGID}||${r.オーダーID}`, r));
 
@@ -238,12 +306,19 @@
 
           // マスタ適用
           let 商品名2 = r.商品名;
-          let 商品分類 = "", 原価 = 0;
+          let 商品分類 = "";
+          let 小分類名 = "";
+          let 原価 = 0;
+
           if (masterMap && masterMap.has(r.JANコード)){
             const m = masterMap.get(r.JANコード);
             if (m.商品名) 商品名2 = m.商品名;
-            商品分類 = m.商品分類 || "";
+            商品分類 = m.商品分類 || "";   // 小分類コード
             原価 = toNumber(m.POS原価, 0);
+          }
+          // カテゴリ対照で小分類名を補完
+          if (categoryMap && 商品分類){
+            小分類名 = categoryMap.get(商品分類) || "";
           }
 
           const 明細金額 = (r.商品価格 || 0) * (r.商品数 || 0);
@@ -255,7 +330,8 @@
             生成時間: tx.生成時間 || r.生成時間,
             JANコード: r.JANコード,
             商品名: 商品名2,
-            商品分類,
+            商品分類,     // 小分類コード
+            小分類名,     // txtから補完
             商品数: r.商品数,
             商品価格: r.商品価格,
             POS原価: 原価,
@@ -285,7 +361,7 @@
         renderTable(
           joined,
           "preview",
-          ["CGID","オーダーID","生成時間","JANコード","商品名","商品分類","商品数","商品価格","POS原価","明細金額","明細粗利"],
+          ["CGID","オーダーID","生成時間","JANコード","商品名","商品分類","小分類名","商品数","商品価格","POS原価","明細金額","明細粗利"],
           50
         );
 
