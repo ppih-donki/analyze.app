@@ -4,28 +4,42 @@
   <meta charset="UTF-8" />
   <title>小売ダッシュボード (完全クライアント / JS版)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Plotly (グラフ) / PapaParse (CSVパーサ) : クライアント実行のみ、データ送信なし -->
+  <!-- Plotly / PapaParse (クライアント実行のみ、外部送信なし) -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin:16px; }
-    .card { border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin-bottom:16px; }
+    :root { --border:#e5e7eb; --muted:#6b7280; --ink:#111827; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin:16px; color:var(--ink); }
+    .card { border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; background:#fff; }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
     .full { grid-column:1 / -1; }
-    .btn { background:#111827; color:#fff; padding:8px 12px; border-radius:8px; border:none; cursor:pointer; }
+    .btn { background:var(--ink); color:#fff; padding:8px 12px; border-radius:8px; border:none; cursor:pointer; }
+    .btn.secondary { background:#374151; }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
     label { font-weight:600; display:block; margin-bottom:6px; }
-    input[type="file"] { padding:8px; border:1px solid #e5e7eb; border-radius:8px; width:100%; }
+    input[type="file"], select, input[type="number"], input[type="range"] {
+      padding:8px; border:1px solid var(--border); border-radius:8px; width:100%;
+    }
     table { width:100%; border-collapse:collapse; }
     th, td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
-    .muted { color:#6b7280; font-size:12px; }
+    .muted { color:var(--muted); font-size:12px; }
     .error { color:#b91c1c; font-weight:600; white-space:pre-wrap; }
+    /* tabs */
+    .tabs { display:flex; gap:8px; margin-bottom:8px; border-bottom:1px solid var(--border); }
+    .tab { padding:8px 12px; border:1px solid var(--border); border-bottom:none; border-radius:8px 8px 0 0; background:#f9fafb; cursor:pointer; }
+    .tab.active { background:#fff; font-weight:700; }
+    .tabcontent { display:none; }
+    .tabcontent.active { display:block; }
+    .metrics { display:flex; gap:12px; flex-wrap:wrap; margin:8px 0; }
+    .metric { border:1px solid var(--border); border-radius:10px; padding:8px 12px; background:#fafafa; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
   </style>
 </head>
 <body>
   <h1>小売ダッシュボード（完全クライアント / JS版）</h1>
   <p class="muted">データはブラウザ内でのみ処理され、サーバーへ送信されません。</p>
 
+  <!-- 取込 -->
   <div class="card row">
     <div>
       <label>取引毎.csv（レシート情報）</label>
@@ -39,30 +53,82 @@
       <label>（任意）商品マスタ product_master.csv（列: 商品コード, 商品名, 商品分類）</label>
       <input id="pmFile" type="file" accept=".csv" />
     </div>
-    <div class="full">
+    <div class="full actions">
       <button id="runBtn" class="btn" disabled>取り込み & 集計（RFMまで）</button>
-      <span id="status" class="muted" style="margin-left:8px;">CSVを2つ選択してください</span>
+      <span id="status" class="muted">CSVを2つ選択してください</span>
     </div>
   </div>
 
-  <div class="card">
-    <h2>取り込み結果（プレビュー）</h2>
-    <div id="preview"></div>
+  <!-- タブ -->
+  <div class="tabs">
+    <div class="tab active" data-tab="previewTab">プレビュー</div>
+    <div class="tab" data-tab="rfmTab">RFM / セグメント</div>
+    <div class="tab" data-tab="exportTab">エクスポート</div>
   </div>
 
-  <div class="card row">
-    <div id="rfmTable" class="full"></div>
-    <div id="segPie" class="full" style="height:420px;"></div>
+  <!-- プレビュー -->
+  <div id="previewTab" class="tabcontent active">
+    <div class="card">
+      <h2>取り込み結果（プレビュー）</h2>
+      <div class="metrics" id="metrics"></div>
+      <div id="preview"></div>
+    </div>
+  </div>
+
+  <!-- RFM / セグメント -->
+  <div id="rfmTab" class="tabcontent">
+    <div class="card row">
+      <div>
+        <label>R/F/M 分割数（パーセンタイル）</label>
+        <select id="binCount">
+          <option value="3">3分割（低/中/高）</option>
+          <option value="4" selected>4分割（四分位）</option>
+          <option value="5">5分割（五分位）</option>
+        </select>
+      </div>
+      <div>
+        <label>グラフの上限（上位N件表示）</label>
+        <input type="number" id="topN" min="10" max="1000" value="50" />
+      </div>
+      <div class="full actions">
+        <button id="recalcBtn" class="btn">再計算（セグメント反映）</button>
+        <button id="rfmPngBtn" class="btn secondary">グラフPNG保存</button>
+        <span class="muted">Rは小さいほど良い、F/Mは大きいほど良い前提でスコア化します</span>
+      </div>
+    </div>
+
+    <div class="card row">
+      <div id="rfmTable" class="full"></div>
+      <div id="segPie" class="full" style="height:420px;"></div>
+      <div id="rfHeat" class="full" style="height:420px;"></div>
+      <div id="scoreBars" class="full" style="height:360px;"></div>
+    </div>
+  </div>
+
+  <!-- エクスポート -->
+  <div id="exportTab" class="tabcontent">
+    <div class="card">
+      <h2>CSV / PNG ダウンロード</h2>
+      <div class="actions">
+        <button id="dlJoined" class="btn">Joined明細をCSVダウンロード</button>
+        <button id="dlRFM" class="btn">RFM結果をCSVダウンロード</button>
+        <button id="dlSeg" class="btn">セグメント一覧をCSVダウンロード</button>
+        <button id="dlPie" class="btn secondary">セグメント円グラフをPNG保存</button>
+        <button id="dlRFHeat" class="btn secondary">R×FヒートマップをPNG保存</button>
+      </div>
+      <p class="muted" style="margin-top:8px;">※ PNG はページ内の描画済みグラフを保存します。表示後に押してください。</p>
+    </div>
   </div>
 
   <script>
-    // ---------- 汎用 ----------
+    // ---------- ユーティリティ ----------
     const $ = (id) => document.getElementById(id);
     const txInput = $("txFile");
     const lnInput = $("lnFile");
     const pmInput = $("pmFile");
     const runBtn  = $("runBtn");
     const statusEl = $("status");
+    const metricsEl = $("metrics");
 
     function updateButton() {
       runBtn.disabled = !(txInput.files.length === 1 && lnInput.files.length === 1);
@@ -81,9 +147,8 @@
         Papa.parse(file, {
           header:true,
           skipEmptyLines:true,
-          encoding:"UTF-8",  // UTF-8-SIG もOK
+          encoding:"UTF-8",
           complete: (res)=>{
-            // ヘッダ正規化
             const data = res.data.map(row=>{
               const o={};
               Object.keys(row).forEach(k=>{
@@ -101,7 +166,6 @@
     function parseDate(s){
       if (!s) return null;
       const t = String(s).trim().replace(/\s+/g, " ");
-      // 2025/8/5 21:53:13 想定
       const d = new Date(t);
       return isNaN(d.getTime()) ? null : d;
     }
@@ -122,7 +186,7 @@
       let html = "<table><thead><tr>";
       headers.forEach(h=> html += `<th>${h}</th>`);
       html += "</tr></thead><tbody>";
-      rows.slice(0,max).forEach(r=>{
+      rows.slice(0, max).forEach(r=>{
         html += "<tr>";
         headers.forEach(h=> html += `<td>${r[h]??""}</td>`);
         html += "</tr>";
@@ -137,15 +201,43 @@
       Plotly.newPlot(elId, data, layout, {displayModeBar:false});
     }
 
-    // ---------- RFM ----------
-    function computeRFM(joined){
-      // ref = max(生成時間) + 1day
-      const maxDate = joined.reduce((acc,r)=> r.生成時間>acc ? r.生成時間 : acc, new Date(0));
+    function toCSV(rows, headers=null){
+      if (!rows || rows.length===0) return "";
+      const cols = headers || Object.keys(rows[0]);
+      const escape = v => `"${String(v??"").replace(/"/g,'""')}"`;
+      const lines = [cols.join(",")];
+      rows.forEach(r=>{
+        lines.push(cols.map(c=>escape(r[c])).join(","));
+      });
+      return lines.join("\r\n");
+    }
+
+    function downloadCSV(filename, rows, headers=null){
+      const csv = toCSV(rows, headers);
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadPNG(divId, filename){
+      Plotly.downloadImage(divId, {format:'png', filename, height:600, width:960});
+    }
+
+    // ---------- グローバル（取り込み後に保持） ----------
+    let joined = [];   // 明細JOIN済み
+    let rfm = [];      // 顧客別RFM
+    let segments = []; // セグメント一覧（顧客ID, セグメント）
+
+    // ---------- RFM & セグメント ----------
+    function computeRFM(joinedArr, bin=4){
+      if (!joinedArr.length) return [];
+      const maxDate = joinedArr.reduce((acc,r)=> r.生成時間>acc ? r.生成時間 : acc, new Date(0));
       const ref = new Date(maxDate.getTime() + 24*60*60*1000);
 
-      // 集計
       const byCust = new Map();
-      for(const r of joined){
+      for(const r of joinedArr){
         const key = r.CGID;
         if(!byCust.has(key)){
           byCust.set(key, {CGID:key, last:r.生成時間, freqSet:new Set([r.オーダーID]), money:0});
@@ -164,21 +256,22 @@
         rows.push({CGID:o.CGID, Recency日:recency, Frequency回数:freq, Monetary金額:mony});
       }
 
-      // スコア：百分位→4分位
+      // スコア化（百分位→bin分割）
       function score(arr, ascGood){
-        // arrは数値配列
         const sorted = [...arr].slice().sort((a,b)=>a-b);
         const rankPct = (v)=>{
+          // 同値の扱いを簡略化：最初の位置基準
           const idx = sorted.findIndex(x=>x===v);
           const pct = (idx+1)/sorted.length;
           return ascGood ? (1-pct) : pct;
         };
         return arr.map(v=>{
           const p = rankPct(v);
-          if (p<=0.25) return 1;
-          if (p<=0.50) return 2;
-          if (p<=0.75) return 3;
-          return 4;
+          const step = 1/bin;
+          for(let i=1;i<=bin;i++){
+            if (p <= i*step) return i; // 1..bin
+          }
+          return bin;
         });
       }
 
@@ -193,29 +286,95 @@
       rows.forEach((r,i)=>{
         r["Rスコア"]=Rs[i]; r["Fスコア"]=Fs[i]; r["Mスコア"]=Ms[i];
         r["RFMスコア"]=Rs[i]+Fs[i]+Ms[i];
-        // 簡易セグメント
-        const rS=Rs[i], fS=Fs[i], mS=Ms[i], t=r["RFMスコア"];
-        let seg="要観察";
-        if (rS>=3 && fS>=3 && mS>=3) seg="ロイヤル";
-        else if (rS>=3 && (fS>=3 || mS>=3)) seg="優良";
-        else if (rS>=3 && fS<=2 && mS<=2) seg="新規/育成";
-        else if (rS===1 && (fS>=3 || mS>=3)) seg="離反懸念";
-        else if (rS===1 && fS<=2 && mS<=2) seg="休眠";
-        else if (t>=10) seg="準ロイヤル";
-        else if (t>=7) seg="一般";
-        r["セグメント"]=seg;
       });
 
       return rows;
     }
 
-    // ---------- 実行 ----------
+    function segmentize(rfmRows){
+      // シンプルなルール（後で編集UI化可能）
+      return rfmRows.map(r=>{
+        const {["Rスコア"]:rs, ["Fスコア"]:fs, ["Mスコア"]:ms, ["RFMスコア"]:t} = r;
+        let seg="要観察";
+        if (rs>=3 && fs>=3 && ms>=3) seg="ロイヤル";
+        else if (rs>=3 && (fs>=3 || ms>=3)) seg="優良";
+        else if (rs>=3 && fs<=2 && ms<=2) seg="新規/育成";
+        else if (rs===1 && (fs>=3 || ms>=3)) seg="離反懸念";
+        else if (rs===1 && fs<=2 && ms<=2) seg="休眠";
+        else if (t>=10) seg="準ロイヤル";
+        else if (t>=7) seg="一般";
+        return {...r, セグメント:seg};
+      });
+    }
+
+    function renderRFM(topN=50){
+      // テーブル
+      const sorted = rfm.slice().sort((a,b)=> b.RFMスコア - a.RFMスコア).slice(0,topN);
+      renderTable(sorted, "rfmTable",
+        ["CGID","Recency日","Frequency回数","Monetary金額","Rスコア","Fスコア","Mスコア","RFMスコア","セグメント"], topN);
+
+      // セグメント円
+      const segCounts = {};
+      rfm.forEach(r=> segCounts[r.セグメント]=(segCounts[r.セグメント]||0)+1);
+      const labels = Object.keys(segCounts);
+      const values = labels.map(k=>segCounts[k]);
+      pie("segPie", labels, values, "セグメント構成（人数）");
+
+      // R×Fヒートマップ
+      const rfKey = (r)=> `${r["Rスコア"]}-${r["Fスコア"]}`;
+      const map = new Map();
+      let maxR=0, maxF=0;
+      rfm.forEach(r=>{
+        const R=r["Rスコア"], F=r["Fスコア"];
+        maxR=Math.max(maxR,R); maxF=Math.max(maxF,F);
+        const k = rfKey(r);
+        map.set(k, (map.get(k)||0)+1);
+      });
+      const z=[], x=[], y=[];
+      for(let f=1; f<=maxF; f++) y.push(`F${f}`);
+      for(let r=1; r<=maxR; r++) x.push(`R${r}`);
+      for(let f=1; f<=maxF; f++){
+        const row=[];
+        for(let r=1; r<=maxR; r++){
+          row.push(map.get(`${r}-${f}`)||0);
+        }
+        z.push(row);
+      }
+      Plotly.newPlot("rfHeat", [{
+        z, x, y, type:"heatmap", colorscale:"Blues", hoverongaps:false
+      }], {title:"R×F ヒートマップ（人数）", margin:{l:48,r:24,t:40,b:40}}, {displayModeBar:false});
+
+      // スコア分布（R/F/M）
+      const countBy = (k) => {
+        const c={}; rfm.forEach(r=>{ const v=r[k]; c[v]=(c[v]||0)+1; }); return c;
+      };
+      const rC=countBy("Rスコア"), fC=countBy("Fスコア"), mC=countBy("Mスコア");
+      const traces = [
+        {x:Object.keys(rC), y:Object.values(rC), type:"bar", name:"R"},
+        {x:Object.keys(fC), y:Object.values(fC), type:"bar", name:"F"},
+        {x:Object.keys(mC), y:Object.values(mC), type:"bar", name:"M"},
+      ];
+      Plotly.newPlot("scoreBars", traces, {barmode:"group", title:"R/F/M スコア分布", margin:{l:48,r:24,t:40,b:40}}, {displayModeBar:false});
+
+      // メトリクス
+      const uids = new Set(rfm.map(d=>d.CGID)).size;
+      metricsEl.innerHTML = `
+        <div class="metric">顧客数: <b>${uids.toLocaleString()}</b></div>
+        <div class="metric">明細行: <b>${joined.length.toLocaleString()}</b></div>
+        <div class="metric">期間: <b>${fmtDate(minDate(joined))} – ${fmtDate(maxDate(joined))}</b></div>
+      `;
+    }
+
+    function fmtDate(d){ if(!d) return "-"; return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`; }
+    function minDate(arr){ return arr.reduce((a,r)=>(!a||r.生成時間<a? r.生成時間:a), null); }
+    function maxDate(arr){ return arr.reduce((a,r)=>(!a||r.生成時間>a? r.生成時間:a), null); }
+
+    // ---------- 実行（取り込み） ----------
     runBtn.addEventListener("click", async ()=>{
       runBtn.disabled = true;
       statusEl.className = "muted";
       statusEl.textContent = "取り込み中…";
       try{
-        // 1) CSV読込
         const [txRows, lnRows] = await Promise.all([
           parseCSVFile(txInput.files[0]),
           parseCSVFile(lnInput.files[0])
@@ -225,7 +384,7 @@
           pmRows = await parseCSVFile(pmInput.files[0]);
         }
 
-        // 2) 必須列チェック
+        // 必須列
         const needTx = new Set(["CGID","オーダーID","生成時間"]);
         const needLn = new Set(["CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"]);
         function hasAll(rows, need){
@@ -243,11 +402,12 @@
           return;
         }
 
-        // 3) 整形
+        // 整形
         txRows.forEach(r=>{
           r.CGID = String(r.CGID??"").trim();
           r.オーダーID = String(r.オーダーID??"").trim();
           r.生成時間 = parseDate(r.生成時間);
+          r.オーダー金額 = r.オーダー金額!=null ? toNumber(r.オーダー金額, null) : null;
         });
         lnRows.forEach(r=>{
           r.CGID = String(r.CGID??"").trim();
@@ -259,7 +419,7 @@
           r.商品価格 = toNumber(r.商品価格,0);
         });
 
-        // 4) マスタ（任意）
+        // マスタ（任意）
         let pmMap = null;
         if (pmRows.length){
           pmMap = new Map();
@@ -273,72 +433,95 @@
           });
         }
 
-        // 5) JOIN（CGID, オーダーID）
-        // 取引をマップ化して生成時間やオーダー金額を付与
+        // JOIN
         const txMap = new Map();
-        txRows.forEach(r=>{
-          txMap.set(`${r.CGID}||${r.オーダーID}`, r);
-        });
-
-        const joined = [];
+        txRows.forEach(r=> txMap.set(`${r.CGID}||${r.オーダーID}`, r));
+        joined = [];
         for(const r of lnRows){
           const key = `${r.CGID}||${r.オーダーID}`;
           if (!txMap.has(key)) continue; // inner join
           const tx = txMap.get(key);
-          // 明細金額
           const 明細金額 = (r.商品価格||0) * (r.商品数||0);
-
-          // マスタ名があれば優先
-          let 商品名2 = r.商品名;
-          let 商品分類 = "";
+          let 商品名2 = r.商品名, 商品分類="";
           if (pmMap && pmMap.has(r.JANコード)){
             const m = pmMap.get(r.JANコード);
             商品名2 = m.商品名 || 商品名2;
             商品分類 = m.商品分類 || "";
           }
-
           joined.push({
             CGID:r.CGID,
             オーダーID:r.オーダーID,
             生成時間: tx.生成時間 || r.生成時間,
             JANコード:r.JANコード,
             商品名: 商品名2,
+            商品分類,
             商品数: r.商品数,
             商品価格: r.商品価格,
             明細金額
           });
         }
 
-        // 6) プレビュー
+        // プレビュー（先頭50）
         renderTable(joined, "preview",
-          ["CGID","オーダーID","生成時間","JANコード","商品名","商品数","商品価格","明細金額"], 30);
+          ["CGID","オーダーID","生成時間","JANコード","商品名","商品分類","商品数","商品価格","明細金額"], 50);
 
-        // 7) RFM
-        const rfm = computeRFM(joined);
-        // 表
-        const rfmSorted = rfm.slice().sort((a,b)=>b.RFMスコア - a.RFMスコア).slice(0,50);
-        renderTable(rfmSorted, "rfmTable",
-          ["CGID","Recency日","Frequency回数","Monetary金額","Rスコア","Fスコア","Mスコア","RFMスコア","セグメント"], 50);
+        // RFM初期計算
+        const bin = Number($("binCount").value);
+        rfm = computeRFM(joined, bin);
+        rfm = segmentize(rfm);
+        renderRFM(Number($("topN").value));
 
-        // 円グラフ
-        const segCounts = {};
-        rfm.forEach(r=> segCounts[r.セグメント]=(segCounts[r.セグメント]||0)+1);
-        const labels = Object.keys(segCounts);
-        const values = labels.map(k=>segCounts[k]);
-        pie("segPie", labels, values, "セグメント構成（人数）");
-
-        statusEl.className="muted";
+        statusEl.className = "muted";
         statusEl.textContent = "完了！";
       }catch(err){
         console.error(err);
-        statusEl.className="error";
+        statusEl.className = "error";
         statusEl.textContent = "エラー: " + (err && err.message ? err.message : String(err));
       }finally{
         runBtn.disabled = false;
       }
     });
 
-    // 初期ボタン状態
+    // 再計算
+    $("recalcBtn").addEventListener("click", ()=>{
+      if (!joined.length){ alert("先にCSVを取り込んでください。"); return; }
+      const bin = Number($("binCount").value);
+      rfm = computeRFM(joined, bin);
+      rfm = segmentize(rfm);
+      renderRFM(Number($("topN").value));
+    });
+
+    // PNG保存（現在の図）
+    $("rfmPngBtn").addEventListener("click", ()=> downloadPNG("scoreBars", "rfm_scores"));
+    $("dlPie").addEventListener("click", ()=> downloadPNG("segPie", "segment_pie"));
+    $("dlRFHeat").addEventListener("click", ()=> downloadPNG("rfHeat", "rf_heatmap"));
+
+    // CSVダウンロード
+    $("dlJoined").addEventListener("click", ()=> {
+      if (!joined.length){ alert("明細がありません"); return; }
+      downloadCSV("joined.csv", joined, ["CGID","オーダーID","生成時間","JANコード","商品名","商品分類","商品数","商品価格","明細金額"]);
+    });
+    $("dlRFM").addEventListener("click", ()=> {
+      if (!rfm.length){ alert("RFMがありません"); return; }
+      downloadCSV("rfm_result.csv", rfm, ["CGID","Recency日","Frequency回数","Monetary金額","Rスコア","Fスコア","Mスコア","RFMスコア","セグメント"]);
+    });
+    $("dlSeg").addEventListener("click", ()=> {
+      if (!rfm.length){ alert("RFMがありません"); return; }
+      const seg = rfm.map(r=>({CGID:r.CGID, セグメント:r.セグメント}));
+      downloadCSV("segments.csv", seg, ["CGID","セグメント"]);
+    });
+
+    // タブ操作
+    document.querySelectorAll(".tab").forEach(t=>{
+      t.addEventListener("click", ()=>{
+        document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+        document.querySelectorAll(".tabcontent").forEach(x=>x.classList.remove("active"));
+        t.classList.add("active");
+        $(t.dataset.tab).classList.add("active");
+      });
+    });
+
+    // 初期
     updateButton();
   </script>
 </body>
