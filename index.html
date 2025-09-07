@@ -194,7 +194,7 @@
     </div>
   </div>
 
-  <!-- RFM分析 -->
+  <!-- RFM分析（新規実装） -->
   <div id="rfmTab" class="tabcontent">
     <div class="card">
       <div class="hstack">
@@ -232,39 +232,8 @@
     </div>
   </div>
 
-  <!-- セグメント分析（新規実装） -->
-  <div id="segTab" class="tabcontent">
-    <div class="card">
-      <h2>セグメント分析</h2>
-      <div class="form-row">
-        <div><label>開始日</label><input type="date" id="segStart" /></div>
-        <div><label>終了日</label><input type="date" id="segEnd" /></div>
-        <div>
-          <label>セグメント</label>
-          <select id="segSelect">
-            <option value="ヘビーユーザー">ヘビーユーザー</option>
-            <option value="一般ユーザー">一般ユーザー</option>
-            <option value="ライトユーザー">ライトユーザー</option>
-            <option value="離反傾向">離反傾向</option>
-            <option value="離反顧客">離反顧客</option>
-          </select>
-        </div>
-        <div class="btn-group">
-          <button id="segRun" class="btn">この条件で集計</button>
-        </div>
-      </div>
-      <div id="segInfo" class="muted" style="margin-bottom:8px;"></div>
-
-      <div class="metrics" id="segKPI"></div>
-      <div id="segChart" style="height:340px; margin-top:8px;"></div>
-
-      <h3 style="margin-top:16px;">小分類ランキング</h3>
-      <div class="muted" style="margin:-4px 0 8px 0;">※平均は「ユーザー平均」です（= セグメント内ユニークCGIDで割る）</div>
-      <div id="segTable"></div>
-    </div>
-  </div>
-
-  <!-- 以降プレースホルダ -->
+  <!-- 以降プレースホルダ（未実装タブ） -->
+  <div id="segTab" class="tabcontent"><div class="card"><p class="muted">セグメント分析は後続で実装します。</p></div></div>
   <div id="repeatOnlyTab" class="tabcontent"><div class="card"><p class="muted">リピート分析は後続で実装します。</p></div></div>
   <div id="pairOnlyTab" class="tabcontent"><div class="card"><p class="muted">併売分析は後続で実装します。</p></div></div>
 
@@ -574,9 +543,9 @@
           <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
         `;
 
-        // 日付UIの初期値（segも追加）
+        // 日付UIの初期値
         if (dMin && dMax){
-          ["best","time","prod","rfm","seg"].forEach(prefix=>{
+          ["best","time","prod","rfm"].forEach(prefix=>{
             $(prefix+"Start").min = $(prefix+"End").min = fmtDate(dMin);
             $(prefix+"Start").max = $(prefix+"End").max = fmtDate(dMax);
             $(prefix+"Start").value = fmtDate(dMin);
@@ -885,7 +854,7 @@
       $("prodDiag").innerHTML = `明細行: ${rows.length.toLocaleString()} / レシート: ${receiptSet.size.toLocaleString()} / 最小日時: ${fmtDateSlash(minDate(rows))} / 最大日時: ${fmtDateSlash(maxDate(rows))}`;
     }
 
-    // ===== RFM（既存） =====
+    // ===== RFM =====
     function quantiles(arr, qs){
       const a = arr.slice().sort((x,y)=>x-y);
       const res = [];
@@ -934,6 +903,7 @@
       const s=$("rfmStart").value, e=$("rfmEnd").value, taxRateSel=Number($("rfmTax").value||"0");
       const sDate=s?new Date(s+"T00:00:00"):null, eDate=e?new Date(e+"T23:59:59"):null;
 
+      // フィルタ対象明細
       const rows=joined.filter(r=> r.生成時間 && (!sDate||r.生成時間>=sDate) && (!eDate||r.生成時間<=eDate));
       if (!rows.length){
         $("rfmInfo").textContent="該当データがありません。";
@@ -942,6 +912,7 @@
         lastRfmRows=[]; return;
       }
 
+      // レシート集約（F/R用）
       const receiptMap = new Map(); // key: CGID||オーダーID
       for (const r of rows){
         const key=`${r.CGID}||${r.オーダーID}`;
@@ -951,8 +922,9 @@
         if (r.生成時間 && (!o.時刻 || r.生成時間>o.時刻)) o.時刻=r.生成時間;
       }
 
+      // 顧客（Mは税抜換算）
       const byUser = new Map();
-      const taxDiv = Number($("rfmTax").value||"0")>0 ? (1+Number($("rfmTax").value)/100) : 1;
+      const taxDiv = taxRateSel>0 ? (1+taxRateSel/100) : 1;
       for (const r of rows){
         const k=r.CGID||"-"; if (!byUser.has(k)) byUser.set(k,{ CGID:k, M:0, GM:0, last:null });
         const u=byUser.get(k);
@@ -961,6 +933,7 @@
         u.GM += (r.明細粗利||0);
         if (!u.last || r.生成時間>u.last) u.last=r.生成時間;
       }
+      // F: レシート件数
       for (const rec of receiptMap.values()){
         if (!byUser.has(rec.CGID)) byUser.set(rec.CGID,{CGID:rec.CGID,M:0,GM:0,last:null});
         const u=byUser.get(rec.CGID);
@@ -981,6 +954,7 @@
         Plotly.purge("rfmPie"); Plotly.purge("rfmScatter"); lastRfmRows=[]; return;
       }
 
+      // 分位カット（全顧客に対する分位）
       const n=list.length;
       let cutsR, cutsF, cutsM;
       if (n<100){
@@ -1011,14 +985,16 @@
         });
       }
 
-      $("rfmInfo").textContent=`期間: ${s||"-"} ~ ${e||"-"} / 顧客数: ${rowsOut.length.toLocaleString()} / 税率: ${Number($("rfmTax").value||"0")}%`;
+      $("rfmInfo").textContent=`期間: ${s||"-"} ~ ${e||"-"} / 顧客数: ${rowsOut.length.toLocaleString()} / 税率: ${taxRateSel}%`;
 
+      // 円グラフ（セグメント分布）
       const segCount = {};
       for (const r of rowsOut){ segCount[r.セグメント]=(segCount[r.セグメント]||0)+1; }
       const segLabels = Object.keys(segCount);
       const segValues = segLabels.map(k=>segCount[k]);
       Plotly.newPlot("rfmPie", [{ type:"pie", labels:segLabels, values:segValues, hole:0.35 }], { margin:{l:10,r:10,t:20,b:10}, showlegend:true }, {responsive:true});
 
+      // 散布図（R×F、サイズ=M）
       Plotly.newPlot("rfmScatter", [{
         x: rowsOut.map(r=> r["R（日数）"]),
         y: rowsOut.map(r=> r["F（回）"]),
@@ -1033,170 +1009,22 @@
         ["CGID","R（日数）","F（回）","M（税抜合計）","GM（粗利合計）","Rスコア","Fスコア","Mスコア","セグメント","最終購入日"], null);
 
       lastRfmRows = rowsOut;
-      lastRfmMeta = { start:s||"", end:e||"", label:"RFM（税抜）", tax: Number($("rfmTax").value||"0") };
+      lastRfmMeta = { start:s||"", end:e||"", label:"RFM（税抜）", tax: taxRateSel };
       $("rfmExport").disabled = rowsOut.length===0;
     }
-
-    // ===== セグメント分析（新規） =====
-    function buildRfmMapForPeriod(s, e){
-      // RFMを同期間で再計算し、CGID→セグメントのMapを返す
-      const sDate=s?new Date(s+"T00:00:00"):null, eDate=e?new Date(e+"T23:59:59"):null;
-      const rows=joined.filter(r=> r.生成時間 && (!sDate||r.生成時間>=sDate) && (!eDate||r.生成時間<=eDate));
-      if (!rows.length) return new Map();
-
-      const receiptMap = new Map();
-      for (const r of rows){
-        const key=`${r.CGID}||${r.オーダーID}`;
-        if (!receiptMap.has(key)) receiptMap.set(key,{ CGID:r.CGID, オーダーID:r.オーダーID, 時刻:r.生成時間 });
-        const o=receiptMap.get(key);
-        if (r.生成時間 && (!o.時刻 || r.生成時間>o.時刻)) o.時刻=r.生成時間;
+    function exportRFM(){
+      if (!lastRfmRows || !lastRfmRows.length) return;
+      const headers = ["CGID","R（日数）","F（回）","M（税抜合計）","GM（粗利合計）","Rスコア","Fスコア","Mスコア","セグメント","最終購入日"];
+      const ymd=(s)=> s ? s.replaceAll("-","/") : "-";
+      const preface = `${ymd(lastRfmMeta.start)} ~ ${ymd(lastRfmMeta.end)} ${lastRfmMeta.label}（税率=${lastRfmMeta.tax}%）`;
+      const lines=[preface, headers.join(",")];
+      for (const r of lastRfmRows){
+        const row=headers.map(h=>{ let v=r[h]; if (v==null) v=""; v=String(v).replaceAll('"','""'); if (/[",\n]/.test(v)) v=`"${v}"`; return v; });
+        lines.push(row.join(","));
       }
-
-      const byUser=new Map();
-      for (const r of rows){
-        const k=r.CGID||"-"; if (!byUser.has(k)) byUser.set(k,{ CGID:k, M:0, GM:0, last:null, F:0 });
-        const u=byUser.get(k);
-        u.M += (r.明細金額||0); // ここは税抜換算は不要（セグメント決定目的で相対比較に十分）
-        u.GM += (r.明細粗利||0);
-        if (!u.last || r.生成時間>u.last) u.last=r.生成時間;
-      }
-      for (const rec of receiptMap.values()){
-        if (!byUser.has(rec.CGID)) byUser.set(rec.CGID,{CGID:rec.CGID,M:0,GM:0,last:null,F:0});
-        byUser.get(rec.CGID).F += 1;
-      }
-
-      const baseDate = eDate || maxDate(rows) || new Date();
-      const list=[];
-      for (const u of byUser.values()){
-        if (!u.last) continue;
-        const days = Math.max(0, Math.floor((baseDate - u.last)/(1000*60*60*24)));
-        list.push({ CGID:u.CGID, R_days:days, F:u.F, M:u.M });
-      }
-      if (!list.length) return new Map();
-
-      const n=list.length;
-      let cutsR, cutsF, cutsM;
-      if (n<100){
-        cutsR = quantiles(list.map(x=>x.R_days), [1/3, 2/3]);
-        cutsF = quantiles(list.map(x=>x.F),      [1/3, 2/3]);
-        cutsM = quantiles(list.map(x=>x.M),      [1/3, 2/3]);
-      }else{
-        cutsR = quantiles(list.map(x=>x.R_days), [0.2,0.4,0.6,0.8]);
-        cutsF = quantiles(list.map(x=>x.F),      [0.2,0.4,0.6,0.8]);
-        cutsM = quantiles(list.map(x=>x.M),      [0.2,0.4,0.6,0.8]);
-      }
-
-      const map=new Map();
-      for (const x of list){
-        const Rs = scoreByQuantile(x.R_days, cutsR, true);
-        const Fs = scoreByQuantile(x.F,      cutsF, false);
-        const Ms = scoreByQuantile(x.M,      cutsM, false);
-        const seg = rfmSegmentName(Rs, Fs, Ms);
-        map.set(x.CGID, seg);
-      }
-      return map;
-    }
-
-    function computeSegmentReport(){
-      if (!joined.length){
-        $("segInfo").textContent = "先にCSVを取り込んでください。";
-        $("segKPI").innerHTML = ""; $("segTable").innerHTML=""; Plotly.purge("segChart");
-        return;
-      }
-      const s = $("segStart").value;
-      const e = $("segEnd").value;
-      const segName = $("segSelect").value;
-
-      const sDate = s ? new Date(s+"T00:00:00") : null;
-      const eDate = e ? new Date(e+"T23:59:59") : null;
-
-      // ①期間でRFM再計算 → セグメント集合
-      const rfmMap = buildRfmMapForPeriod(s, e);
-      const targetUsers = new Set([...rfmMap.entries()].filter(([cgid, seg])=> seg===segName).map(([cgid])=> cgid));
-      if (targetUsers.size===0){
-        $("segInfo").textContent = `期間: ${s||"-"} ~ ${e||"-"} / セグメント: ${segName} / 対象ユーザー 0`;
-        $("segKPI").innerHTML = ""; $("segTable").innerHTML=""; Plotly.purge("segChart");
-        return;
-      }
-
-      // ②同期間の明細を対象ユーザーで抽出
-      const rows = joined.filter(r=>{
-        if (!r.生成時間) return false;
-        if (sDate && r.生成時間 < sDate) return false;
-        if (eDate && r.生成時間 > eDate) return false;
-        return targetUsers.has(r.CGID);
-      });
-      if (!rows.length){
-        $("segInfo").textContent = `期間: ${s||"-"} ~ ${e||"-"} / セグメント: ${segName} / 明細 0`;
-        $("segKPI").innerHTML = ""; $("segTable").innerHTML=""; Plotly.purge("segChart");
-        return;
-      }
-
-      // KPI（ユーザー平均で算出）
-      const uuSet = new Set(rows.map(r=> r.CGID).filter(Boolean));
-      const users = uuSet.size || 1;
-
-      const totalQty = rows.reduce((s,x)=> s + (x.商品数||0), 0);
-      const totalAmt = rows.reduce((s,x)=> s + (x.明細金額||0), 0);
-      const totalGp  = rows.reduce((s,x)=> s + (x.明細粗利||0), 0);
-      const receipts = new Set(rows.map(r=> r.オーダーID)).size;
-
-      const avgQty = totalQty / users;
-      const avgAmt = totalAmt / users;
-      const avgGp  = totalGp  / users;
-      const avgRcpt = receipts / users;
-
-      $("segInfo").textContent = `期間: ${s||"-"} ~ ${e||"-"} / セグメント: ${segName} / ユーザー数: ${users.toLocaleString()} / 明細: ${rows.length.toLocaleString()}`;
-
-      $("segKPI").innerHTML = `
-        <div class="metric">購入点数 合計: <span class="kpi-strong">${Math.round(totalQty).toLocaleString()}</span></div>
-        <div class="metric">購入点数 平均/ユーザー: <span class="kpi-strong">${avgQty.toFixed(2)}</span></div>
-        <div class="metric">購入額 合計: <span class="kpi-strong">${Math.round(totalAmt).toLocaleString()}</span></div>
-        <div class="metric">購入額 平均/ユーザー: <span class="kpi-strong">${avgAmt.toFixed(2)}</span></div>
-        <div class="metric">粗利額 合計: <span class="kpi-strong">${Math.round(totalGp).toLocaleString()}</span></div>
-        <div class="metric">粗利額 平均/ユーザー: <span class="kpi-strong">${avgGp.toFixed(2)}</span></div>
-        <div class="metric">レシート件数 合計: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
-        <div class="metric">レシート件数 平均/ユーザー: <span class="kpi-strong">${avgRcpt.toFixed(2)}</span></div>
-      `;
-
-      // 時間帯（売上金額）
-      const buckets = Array.from({length:24}, (_,h)=>({h, amt:0}));
-      rows.forEach(r=>{
-        const h = r.生成時間.getHours();
-        buckets[h].amt += (r.明細金額 || 0);
-      });
-      Plotly.newPlot("segChart", [{
-        type:"scatter", mode:"lines+markers",
-        x: buckets.map(b=> String(b.h).padStart(2,"0")+":00"),
-        y: buckets.map(b=> Math.round(b.amt)),
-        name:"売上金額"
-      }], {
-        margin:{l:50,r:10,t:10,b:40},
-        xaxis:{title:"時間帯（時）"},
-        yaxis:{title:"売上金額", rangemode:"tozero"},
-        displayModeBar:false
-      }, {responsive:true});
-
-      // 小分類ランキング（点数合計・点数平均/ユーザー）
-      const byCat = new Map();
-      for (const r of rows){
-        const key = r.小分類名 || "(不明)";
-        if (!byCat.has(key)) byCat.set(key, { 小分類:key, 点数合計:0, ユーザーset:new Set() });
-        const o = byCat.get(key);
-        o.点数合計 += (r.商品数||0);
-        if (r.CGID) o.ユーザーset.add(r.CGID);
-      }
-      const catRows = [];
-      for (const o of byCat.values()){
-        catRows.push({
-          小分類: o.小分類,
-          点数合計: Math.round(o.点数合計),
-          購買ユーザー数: o.ユーザーset.size,
-          点数平均/ユーザー: +(o.点数合計 / Math.max(1, o.ユーザーset.size)).toFixed(2)
-        });
-      }
-      catRows.sort((a,b)=> b.点数合計 - a.点数合計);
-      renderTable(catRows, "segTable", ["小分類","点数合計","購買ユーザー数","点数平均/ユーザー"], null);
+      const csv="\uFEFF"+lines.join("\n"); const fn=`${lastRfmMeta.start||"all"}_${lastRfmMeta.end||"all"}_RFM.csv`;
+      const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}); const url=URL.createObjectURL(blob);
+      const a=document.createElement("a"); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
     // ===== UI配線 =====
@@ -1244,7 +1072,7 @@
         catStatus: $("catStatus"),
       };
 
-      // ファイルピッカー
+      // ファイルピッカー（PC想定）
       els.pickTx?.addEventListener("click", ()=> els.txInput?.click());
       els.pickLn?.addEventListener("click", ()=> els.lnInput?.click());
       els.pickPm?.addEventListener("click", ()=> els.pmInput?.click());
@@ -1277,9 +1105,6 @@
       // RFM
       $("rfmRun")?.addEventListener("click", computeRFM);
       $("rfmExport")?.addEventListener("click", exportRFM);
-
-      // セグメント分析
-      $("segRun")?.addEventListener("click", computeSegmentReport);
 
       // 初期UI
       updateButton();
