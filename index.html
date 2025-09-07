@@ -2,30 +2,28 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>小売ダッシュボード (完全クライアント)</title>
+  <title>小売ダッシュボード (完全クライアント / JS版)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- PyScript -->
-  <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
-  <script defer src="https://pyscript.net/latest/pyscript.js"></script>
-  <!-- Plotly (グラフ) -->
+  <!-- Plotly (グラフ) / PapaParse (CSVパーサ) : クライアント実行のみ、データ送信なし -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin: 16px; }
-    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .full { grid-column: 1 / -1; }
-    .btn { background: #111827; color: #fff; padding: 8px 12px; border-radius: 8px; border: none; cursor: pointer; }
-    .btn:disabled { opacity: .5; cursor: not-allowed; }
-    label { font-weight: 600; display:block; margin-bottom: 6px; }
-    input[type="file"] { padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; width: 100%; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; }
-    .muted { color: #6b7280; font-size: 12px; }
-    .error { color: #b91c1c; font-weight: 600; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin:16px; }
+    .card { border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin-bottom:16px; }
+    .row { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    .full { grid-column:1 / -1; }
+    .btn { background:#111827; color:#fff; padding:8px 12px; border-radius:8px; border:none; cursor:pointer; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    label { font-weight:600; display:block; margin-bottom:6px; }
+    input[type="file"] { padding:8px; border:1px solid #e5e7eb; border-radius:8px; width:100%; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
+    .muted { color:#6b7280; font-size:12px; }
+    .error { color:#b91c1c; font-weight:600; white-space:pre-wrap; }
   </style>
 </head>
 <body>
-  <h1>小売ダッシュボード（完全クライアント）</h1>
+  <h1>小売ダッシュボード（完全クライアント / JS版）</h1>
   <p class="muted">データはブラウザ内でのみ処理され、サーバーへ送信されません。</p>
 
   <div class="card row">
@@ -38,7 +36,7 @@
       <input id="lnFile" type="file" accept=".csv" />
     </div>
     <div class="full">
-      <label>（任意）商品マスタ product_master.csv（JAN, 商品名, 商品分類）</label>
+      <label>（任意）商品マスタ product_master.csv（列: 商品コード, 商品名, 商品分類）</label>
       <input id="pmFile" type="file" accept=".csv" />
     </div>
     <div class="full">
@@ -57,190 +55,291 @@
     <div id="segPie" class="full" style="height:420px;"></div>
   </div>
 
-  <py-config>
-    packages = ["pandas"]
-  </py-config>
+  <script>
+    // ---------- 汎用 ----------
+    const $ = (id) => document.getElementById(id);
+    const txInput = $("txFile");
+    const lnInput = $("lnFile");
+    const pmInput = $("pmFile");
+    const runBtn  = $("runBtn");
+    const statusEl = $("status");
 
-  <py-script>
-from js import document, FileReader, console, Plotly
-import pandas as pd
-import io, asyncio, traceback
+    function updateButton() {
+      runBtn.disabled = !(txInput.files.length === 1 && lnInput.files.length === 1);
+      statusEl.className = "muted";
+      statusEl.textContent = runBtn.disabled ? "CSVを2つ選択してください" : "準備OK。取り込み＆集計できます。";
+    }
+    txInput.addEventListener("change", updateButton);
+    lnInput.addEventListener("change", updateButton);
 
-# ---------- ユーティリティ ----------
-async def read_csv_file(file_obj):
-    """
-    ブラウザのFileを読み込んでpandasへ。
-    *重要*: 非同期関数 (async) にし、awaitを正しく扱う。
-    """
-    reader = FileReader.new()
-    fut = asyncio.get_event_loop().create_future()
+    function normalizeHeader(h){
+      return String(h || "").replace(/\ufeff/g,"").trim();
+    }
 
-    def onload(_):
-        fut.set_result(reader.result)
+    function parseCSVFile(file){
+      return new Promise((resolve,reject)=>{
+        Papa.parse(file, {
+          header:true,
+          skipEmptyLines:true,
+          encoding:"UTF-8",  // UTF-8-SIG もOK
+          complete: (res)=>{
+            // ヘッダ正規化
+            const data = res.data.map(row=>{
+              const o={};
+              Object.keys(row).forEach(k=>{
+                o[normalizeHeader(k)] = row[k];
+              });
+              return o;
+            });
+            resolve(data);
+          },
+          error: (err)=>reject(err)
+        });
+      });
+    }
 
-    reader.onload = onload
-    reader.readAsText(file_obj)         # 文字列として読む（encodingはブラウザ依存）
-    js_text = await fut                 # ここでawait
-    text = str(js_text)
-    # pandasは文字列IOをそのまま受け取れる
-    return pd.read_csv(io.StringIO(text))
+    function parseDate(s){
+      if (!s) return null;
+      const t = String(s).trim().replace(/\s+/g, " ");
+      // 2025/8/5 21:53:13 想定
+      const d = new Date(t);
+      return isNaN(d.getTime()) ? null : d;
+    }
 
-def normalize_columns(df):
-    def norm(s):
-        s = str(s).replace("\ufeff","").strip()
-        return s
-    df.columns = [norm(c) for c in df.columns]
-    return df
+    function toNumber(x, def=0){
+      const v = Number(String(x).replace(/,/g,"").trim());
+      return isNaN(v) ? def : v;
+    }
 
-def parse_datetime_series(s):
-    # "2025/8/5  21:53:13" のような複数スペースもOKにする
-    ss = s.astype(str).str.strip().str.replace(r"\s+", " ", regex=True)
-    return pd.to_datetime(ss, errors="coerce")
+    function renderTable(rows, elId, cols=null, max=50){
+      const el = $(elId);
+      if (!rows || rows.length===0){
+        el.innerHTML = "<p class='muted'>データがありません。</p>";
+        return;
+      }
+      const sample = rows[0];
+      const headers = cols || Object.keys(sample);
+      let html = "<table><thead><tr>";
+      headers.forEach(h=> html += `<th>${h}</th>`);
+      html += "</tr></thead><tbody>";
+      rows.slice(0,max).forEach(r=>{
+        html += "<tr>";
+        headers.forEach(h=> html += `<td>${r[h]??""}</td>`);
+        html += "</tr>";
+      });
+      html += "</tbody></table>";
+      el.innerHTML = html;
+    }
 
-def render_table(df, el_id, max_rows=50):
-    el = document.getElementById(el_id)
-    if df is None or df.empty:
-        el.innerHTML = "<p class='muted'>データがありません。</p>"
-        return
-    html = "<table><thead><tr>"
-    for c in df.columns:
-        html += f"<th>{c}</th>"
-    html += "</tr></thead><tbody>"
-    for _, row in df.head(max_rows).iterrows():
-        html += "<tr>" + "".join(f"<td>{row[c]}</td>" for c in df.columns) + "</tr>"
-    html += "</tbody></table>"
-    el.innerHTML = html
+    function pie(elId, labels, values, title){
+      const data = [{labels, values, type:"pie", hole:0.45}];
+      const layout = {title, margin:{l:24,r:24,t:40,b:24}};
+      Plotly.newPlot(elId, data, layout, {displayModeBar:false});
+    }
 
-def render_seg_pie(rfm):
-    counts = rfm["セグメント"].value_counts().sort_values(ascending=False)
-    data = [dict(labels=list(counts.index), values=list(counts.values), type="pie", hole=0.45)]
-    layout = dict(title="セグメント構成（人数）", margin=dict(l=24,r=24,t=40,b=24))
-    Plotly.newPlot("segPie", data, layout, {"displayModeBar": False})
+    // ---------- RFM ----------
+    function computeRFM(joined){
+      // ref = max(生成時間) + 1day
+      const maxDate = joined.reduce((acc,r)=> r.生成時間>acc ? r.生成時間 : acc, new Date(0));
+      const ref = new Date(maxDate.getTime() + 24*60*60*1000);
 
-def rfm_from_joined(df_join):
-    ref = df_join["生成時間"].max() + pd.Timedelta(days=1)
-    rfm = df_join.groupby("CGID").agg(
-        Recency日=("生成時間", lambda x: (ref - x.max()).days),
-        Frequency回数=("オーダーID", "nunique"),
-        Monetary金額=("明細金額", "sum"),
-    ).reset_index()
+      // 集計
+      const byCust = new Map();
+      for(const r of joined){
+        const key = r.CGID;
+        if(!byCust.has(key)){
+          byCust.set(key, {CGID:key, last:r.生成時間, freqSet:new Set([r.オーダーID]), money:0});
+        }
+        const o = byCust.get(key);
+        if (r.生成時間 > o.last) o.last = r.生成時間;
+        o.freqSet.add(r.オーダーID);
+        o.money += r.明細金額;
+      }
 
-    def score(series, asc_good):
-        r = series.rank(method="average", pct=True)
-        if asc_good: r = 1 - r
-        bins = [0.0, 0.25, 0.50, 0.75, 1.0]
-        labels = [1,2,3,4]
-        return pd.cut(r.fillna(0.0), bins=bins, labels=labels, include_lowest=True).astype(int)
+      const rows=[];
+      for(const o of byCust.values()){
+        const recency = Math.floor((ref - o.last)/(1000*60*60*24));
+        const freq = o.freqSet.size;
+        const mony = o.money;
+        rows.push({CGID:o.CGID, Recency日:recency, Frequency回数:freq, Monetary金額:mony});
+      }
 
-    rfm["Rスコア"] = score(rfm["Recency日"], True)
-    rfm["Fスコア"] = score(rfm["Frequency回数"], False)
-    rfm["Mスコア"] = score(rfm["Monetary金額"], False)
-    rfm["RFMスコア"] = rfm["Rスコア"] + rfm["Fスコア"] + rfm["Mスコア"]
+      // スコア：百分位→4分位
+      function score(arr, ascGood){
+        // arrは数値配列
+        const sorted = [...arr].slice().sort((a,b)=>a-b);
+        const rankPct = (v)=>{
+          const idx = sorted.findIndex(x=>x===v);
+          const pct = (idx+1)/sorted.length;
+          return ascGood ? (1-pct) : pct;
+        };
+        return arr.map(v=>{
+          const p = rankPct(v);
+          if (p<=0.25) return 1;
+          if (p<=0.50) return 2;
+          if (p<=0.75) return 3;
+          return 4;
+        });
+      }
 
-    def seg(r,f,m,t):
-        if r>=3 and f>=3 and m>=3: return "ロイヤル"
-        if r>=3 and (f>=3 or m>=3): return "優良"
-        if r>=3 and f<=2 and m<=2: return "新規/育成"
-        if r==1 and (f>=3 or m>=3): return "離反懸念"
-        if r==1 and f<=2 and m<=2: return "休眠"
-        if t>=10: return "準ロイヤル"
-        if t>=7: return "一般"
-        return "要観察"
+      const R = rows.map(r=>r.Recency日);
+      const F = rows.map(r=>r.Frequency回数);
+      const M = rows.map(r=>r.Monetary金額);
 
-    rfm["セグメント"] = [seg(r,f,m,t) for r,f,m,t in zip(rfm["Rスコア"], rfm["Fスコア"], rfm["Mスコア"], rfm["RFMスコア"])]
-    return rfm
+      const Rs = score(R, true);
+      const Fs = score(F, false);
+      const Ms = score(M, false);
 
-# ---------- UI結線 ----------
-txInput = document.getElementById("txFile")
-lnInput = document.getElementById("lnFile")
-pmInput = document.getElementById("pmFile")
-runBtn  = document.getElementById("runBtn")
-status  = document.getElementById("status")
+      rows.forEach((r,i)=>{
+        r["Rスコア"]=Rs[i]; r["Fスコア"]=Fs[i]; r["Mスコア"]=Ms[i];
+        r["RFMスコア"]=Rs[i]+Fs[i]+Ms[i];
+        // 簡易セグメント
+        const rS=Rs[i], fS=Fs[i], mS=Ms[i], t=r["RFMスコア"];
+        let seg="要観察";
+        if (rS>=3 && fS>=3 && mS>=3) seg="ロイヤル";
+        else if (rS>=3 && (fS>=3 || mS>=3)) seg="優良";
+        else if (rS>=3 && fS<=2 && mS<=2) seg="新規/育成";
+        else if (rS===1 && (fS>=3 || mS>=3)) seg="離反懸念";
+        else if (rS===1 && fS<=2 && mS<=2) seg="休眠";
+        else if (t>=10) seg="準ロイヤル";
+        else if (t>=7) seg="一般";
+        r["セグメント"]=seg;
+      });
 
-def update_button_state(*args, **kwargs):
-    runBtn.disabled = not (txInput.files.length == 1 and lnInput.files.length == 1)
-    status.innerText = "準備OK。取り込み＆集計できます。" if not runBtn.disabled else "CSVを2つ選択してください"
+      return rows;
+    }
 
-txInput.addEventListener("change", update_button_state)
-lnInput.addEventListener("change", update_button_state)
+    // ---------- 実行 ----------
+    runBtn.addEventListener("click", async ()=>{
+      runBtn.disabled = true;
+      statusEl.className = "muted";
+      statusEl.textContent = "取り込み中…";
+      try{
+        // 1) CSV読込
+        const [txRows, lnRows] = await Promise.all([
+          parseCSVFile(txInput.files[0]),
+          parseCSVFile(lnInput.files[0])
+        ]);
+        let pmRows = [];
+        if (pmInput.files.length===1){
+          pmRows = await parseCSVFile(pmInput.files[0]);
+        }
 
-async def on_run_click(evt):
-    runBtn.disabled = True
-    status.className = "muted"
-    status.innerText = "取り込み中…"
-    try:
-        # 1) 取込
-        tx_df = await read_csv_file(txInput.files.item(0))
-        ln_df = await read_csv_file(lnInput.files.item(0))
-        tx_df = normalize_columns(tx_df)
-        ln_df = normalize_columns(ln_df)
+        // 2) 必須列チェック
+        const needTx = new Set(["CGID","オーダーID","生成時間"]);
+        const needLn = new Set(["CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"]);
+        function hasAll(rows, need){
+          if (!rows || rows.length===0) return false;
+          const headers = new Set(Object.keys(rows[0]));
+          for(const c of need){ if(!headers.has(c)) return false; }
+          return true;
+        }
+        const miss=[];
+        if (!hasAll(txRows, needTx)) miss.push("取引毎の必須列不足");
+        if (!hasAll(lnRows, needLn)) miss.push("商品毎の必須列不足");
+        if (miss.length){
+          statusEl.className="error";
+          statusEl.textContent="必須列が不足しています → " + miss.join(" / ");
+          return;
+        }
 
-        # 必須列チェック
-        need_tx = {"CGID","オーダーID","生成時間"}
-        need_ln = {"CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"}
-        miss = []
-        if not need_tx.issubset(set(tx_df.columns)):
-            miss.append(f"取引毎の不足: {need_tx - set(tx_df.columns)}")
-        if not need_ln.issubset(set(ln_df.columns)):
-            miss.append(f"商品毎の不足: {need_ln - set(ln_df.columns)}")
-        if miss:
-            status.className = "error"
-            status.innerText = "必須列が不足しています → " + " / ".join(miss)
-            return
+        // 3) 整形
+        txRows.forEach(r=>{
+          r.CGID = String(r.CGID??"").trim();
+          r.オーダーID = String(r.オーダーID??"").trim();
+          r.生成時間 = parseDate(r.生成時間);
+        });
+        lnRows.forEach(r=>{
+          r.CGID = String(r.CGID??"").trim();
+          r.オーダーID = String(r.オーダーID??"").trim();
+          r.JANコード = String(r.JANコード??"").trim();
+          r.商品名 = String(r.商品名??"").trim();
+          r.生成時間 = parseDate(r.生成時間);
+          r.商品数 = Math.trunc(toNumber(r.商品数,0));
+          r.商品価格 = toNumber(r.商品価格,0);
+        });
 
-        # 2) 型＆日付整形
-        for c in ["CGID","オーダーID","JANコード","商品名"]:
-            if c in ln_df.columns: ln_df[c] = ln_df[c].astype("string").str.strip()
-        for c in ["CGID","オーダーID"]:
-            tx_df[c] = tx_df[c].astype("string").str.strip()
-        ln_df["商品数"]   = pd.to_numeric(ln_df["商品数"], errors="coerce").fillna(0).astype(int)
-        ln_df["商品価格"] = pd.to_numeric(ln_df["商品価格"], errors="coerce").fillna(0.0)
+        // 4) マスタ（任意）
+        let pmMap = null;
+        if (pmRows.length){
+          pmMap = new Map();
+          pmRows.forEach(r=>{
+            const jan = String((r["商品コード"]??"") || (r["JAN"]??"") || (r["JANコード"]??"")).trim();
+            if (!jan) return;
+            pmMap.set(jan, {
+              商品名: String(r["商品名"]??"").trim(),
+              商品分類: String(r["商品分類"]??"").trim()
+            });
+          });
+        }
 
-        tx_df["生成時間"] = parse_datetime_series(tx_df["生成時間"])
-        ln_df["生成時間"] = parse_datetime_series(ln_df["生成時間"])
+        // 5) JOIN（CGID, オーダーID）
+        // 取引をマップ化して生成時間やオーダー金額を付与
+        const txMap = new Map();
+        txRows.forEach(r=>{
+          txMap.set(`${r.CGID}||${r.オーダーID}`, r);
+        });
 
-        # 3) マスタ（任意）
-        if pmInput.files.length == 1:
-            pm_df = await read_csv_file(pmInput.files.item(0))
-            pm_df = normalize_columns(pm_df)
-            # 想定: 商品コード, 商品分類, 商品名
-            ren = {}
-            if "商品コード" in pm_df.columns: ren["商品コード"] = "JANコード"
-            if "商品名" in pm_df.columns:   ren["商品名"]     = "マスタ商品名"
-            if "商品分類" in pm_df.columns: ren["商品分類"]     = "商品分類"
-            pm_df = pm_df.rename(columns=ren)
-            if "JANコード" in pm_df.columns:
-                pm_df["JANコード"] = pm_df["JANコード"].astype("string").str.strip()
-                keep = [c for c in ["JANコード","マスタ商品名","商品分類"] if c in pm_df.columns]
-                ln_df = ln_df.merge(pm_df[keep], on="JANコード", how="left")
-                if "マスタ商品名" in ln_df.columns:
-                    ln_df["商品名"] = ln_df["マスタ商品名"].combine_first(ln_df["商品名"])
-                    ln_df.drop(columns=["マスタ商品名"], inplace=True)
+        const joined = [];
+        for(const r of lnRows){
+          const key = `${r.CGID}||${r.オーダーID}`;
+          if (!txMap.has(key)) continue; // inner join
+          const tx = txMap.get(key);
+          // 明細金額
+          const 明細金額 = (r.商品価格||0) * (r.商品数||0);
 
-        # 4) JOIN（CGID, オーダーID で）
-        tx_keep = ["CGID","オーダーID","生成時間"]
-        if "オーダー金額" in tx_df.columns: tx_keep.append("オーダー金額")
-        joined = ln_df.merge(tx_df[tx_keep], on=["CGID","オーダーID"], how="inner")
-        joined["明細金額"] = joined["商品価格"] * joined["商品数"]
+          // マスタ名があれば優先
+          let 商品名2 = r.商品名;
+          let 商品分類 = "";
+          if (pmMap && pmMap.has(r.JANコード)){
+            const m = pmMap.get(r.JANコード);
+            商品名2 = m.商品名 || 商品名2;
+            商品分類 = m.商品分類 || "";
+          }
 
-        # 5) プレビュー
-        render_table(joined[["CGID","オーダーID","生成時間","JANコード","商品名","商品数","商品価格","明細金額"]], "preview", max_rows=30)
+          joined.push({
+            CGID:r.CGID,
+            オーダーID:r.オーダーID,
+            生成時間: tx.生成時間 || r.生成時間,
+            JANコード:r.JANコード,
+            商品名: 商品名2,
+            商品数: r.商品数,
+            商品価格: r.商品価格,
+            明細金額
+          });
+        }
 
-        # 6) RFM
-        rfm = rfm_from_joined(joined)
-        render_table(rfm.sort_values("RFMスコア", ascending=False).head(50), "rfmTable", max_rows=50)
-        render_seg_pie(rfm)
+        // 6) プレビュー
+        renderTable(joined, "preview",
+          ["CGID","オーダーID","生成時間","JANコード","商品名","商品数","商品価格","明細金額"], 30);
 
-        status.className = "muted"
-        status.innerText = "完了！"
-    except Exception as e:
-        status.className = "error"
-        status.innerText = "エラー: " + str(e)
-        console.error(traceback.format_exc())
-    finally:
-        runBtn.disabled = False
+        // 7) RFM
+        const rfm = computeRFM(joined);
+        // 表
+        const rfmSorted = rfm.slice().sort((a,b)=>b.RFMスコア - a.RFMスコア).slice(0,50);
+        renderTable(rfmSorted, "rfmTable",
+          ["CGID","Recency日","Frequency回数","Monetary金額","Rスコア","Fスコア","Mスコア","RFMスコア","セグメント"], 50);
 
-document.getElementById("runBtn").addEventListener("click", on_run_click)
-  </py-script>
+        // 円グラフ
+        const segCounts = {};
+        rfm.forEach(r=> segCounts[r.セグメント]=(segCounts[r.セグメント]||0)+1);
+        const labels = Object.keys(segCounts);
+        const values = labels.map(k=>segCounts[k]);
+        pie("segPie", labels, values, "セグメント構成（人数）");
+
+        statusEl.className="muted";
+        statusEl.textContent = "完了！";
+      }catch(err){
+        console.error(err);
+        statusEl.className="error";
+        statusEl.textContent = "エラー: " + (err && err.message ? err.message : String(err));
+      }finally{
+        runBtn.disabled = false;
+      }
+    });
+
+    // 初期ボタン状態
+    updateButton();
+  </script>
 </body>
 </html>
