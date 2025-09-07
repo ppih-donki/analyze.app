@@ -11,13 +11,19 @@
     :root { --border:#e5e7eb; --muted:#6b7280; --ink:#111827; --bg:#fff; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin:16px; color:var(--ink); background:var(--bg); }
     .card { border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; background:#fff; }
-    .btn { background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }
+    .btn { background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; border:none; cursor:pointer; display:inline-block; text-decoration:none; }
     .btn.secondary { background:#374151; }
     .btn.ghost { background:#fff; color:var(--ink); border:1px solid var(--border); }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
     .btn-group { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
     label { font-weight:700; display:block; margin-bottom:6px; }
-    input[type="file"] { display:none; }
+    /* ファイル入力は“見えないだけ”。display:none は使わない */
+    input[type="file"] {
+      position: absolute;
+      left: -9999px;
+      width: 1px; height: 1px;
+      opacity: 0;
+    }
     .muted { color:var(--muted); font-size:12px; }
     .error { color:#b91c1c; font-weight:700; white-space:pre-wrap; }
     .metrics { display:flex; gap:12px; flex-wrap:wrap; margin:8px 0; }
@@ -51,35 +57,43 @@
 </head>
 <body>
   <h1>無人店舗分析ツール</h1>
-  <p class="muted">データはブラウザ内でのみ処理され、サーバーへ送信されません。</p>
+  <p class="muted">データはブラウザ内でのみ処理され、サーバーへ送信されません。（PC想定）</p>
 
   <!-- 取込UI -->
   <div class="card">
     <label style="margin-bottom:10px;">csv取り込み</label>
+
     <div class="btn-group" style="margin-bottom:6px;">
       <div class="fileline">
-        <button id="pickTx" class="btn">取引毎</button>
+        <label for="txFile" class="btn">取引毎</label>
         <span id="fnameTx" class="fname muted">未選択</span>
       </div>
+
       <div class="fileline">
-        <button id="pickLn" class="btn">商品毎</button>
+        <label for="lnFile" class="btn">商品毎</label>
         <span id="fnameLn" class="fname muted">未選択</span>
       </div>
+
       <div class="fileline">
-        <button id="pickPm" class="btn secondary">商品マスタ取り込み(csv)</button>
+        <label for="pmFile" class="btn secondary">商品マスタ取り込み(csv)</label>
         <span id="fnamePm" class="fname muted">未選択</span>
       </div>
+
       <span id="status" class="muted" style="margin-left:auto;">CSVを2つ選択してください</span>
     </div>
+
+    <!-- 実体の file input（視覚的に隠してあるだけ） -->
     <input id="txFile" type="file" accept=".csv" />
     <input id="lnFile" type="file" accept=".csv" />
     <input id="pmFile" type="file" accept=".csv" />
+
     <div class="btn-group" style="margin-top:8px;">
       <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
       <span id="catStatus" class="muted">カテゴリマスタ：起動時にGitHubから自動読込</span>
     </div>
+
     <p class="muted" style="margin-top:8px;">
-      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code>（ExcelのM列）
+      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>でも可）/ <code>POS原価</code>（ExcelのM列）
     </p>
   </div>
 
@@ -105,7 +119,7 @@
     </div>
   </div>
 
-  <!-- ベスレポ集計（既存） -->
+  <!-- ベスレポ集計 -->
   <div id="bestTab" class="tabcontent">
     <div class="card">
       <h2>ベスレポ集計</h2>
@@ -132,7 +146,7 @@
     </div>
   </div>
 
-  <!-- 時間帯集計（既存） -->
+  <!-- 時間帯集計 -->
   <div id="timeTab" class="tabcontent">
     <div class="card">
       <h2>時間帯集計（1時間ごと）</h2>
@@ -168,7 +182,7 @@
     </div>
   </div>
 
-  <!-- 単品分析（既存） -->
+  <!-- 単品分析 -->
   <div id="prodTab" class="tabcontent">
     <div class="card">
       <h2>単品分析</h2>
@@ -185,7 +199,7 @@
     </div>
   </div>
 
-  <!-- RFM分析（新規実装） -->
+  <!-- RFM分析（ポップアップ説明付き） -->
   <div id="rfmTab" class="tabcontent">
     <div class="card">
       <div class="hstack">
@@ -199,10 +213,10 @@
         <div><label>開始日</label><input type="date" id="rfmStart" /></div>
         <div><label>終了日</label><input type="date" id="rfmEnd" /></div>
         <div>
-          <label>税率（Mは税抜採用）</label>
+          <label>税率（Mは税抜換算）</label>
           <select id="rfmTax">
             <option value="0">0%（既に税抜）</option>
-            <option value="10" selected>10%（税込→税抜換算）</option>
+            <option value="10" selected>10%（税込→税抜）</option>
             <option value="8">8%（軽減）</option>
           </select>
         </div>
@@ -223,7 +237,7 @@
     </div>
   </div>
 
-  <!-- 以下のタブはプレースホルダ -->
+  <!-- 以降プレースホルダ -->
   <div id="segTab" class="tabcontent"><div class="card"><p class="muted">セグメント分析は後続で実装します。</p></div></div>
   <div id="repeatOnlyTab" class="tabcontent"><div class="card"><p class="muted">リピート分析は後続で実装します。</p></div></div>
   <div id="pairOnlyTab" class="tabcontent"><div class="card"><p class="muted">併売分析は後続で実装します。</p></div></div>
@@ -473,7 +487,6 @@
           <div class="metric">売上金額合計: <span class="kpi-strong">${totalAmt.toLocaleString()}</span></div>
           <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
         `;
-        // 日付初期化
         if (dMin && dMax){
           ["best","time","prod","rfm"].forEach(prefix=>{
             $(prefix+"Start").min = $(prefix+"End").min = fmtDate(dMin);
@@ -597,7 +610,7 @@
       $("prodHeader").innerHTML=`期間: ${s||"-"} ~ ${e||"-"} / 対象JAN: <span class="badge">${janInput}</span> ${prodName? " / 商品名: "+prodName:""} ${smallCat? " / 小分類: "+smallCat:""}`;
       if (!rows.length){ $("prodSummary").innerHTML="<p class='muted'>該当データがありません。</p>"; Plotly.purge("prodChart"); $("prodDiag").style.display="none"; return; }
       const totalQty=rows.reduce((s,x)=>s+(x.商品数||0),0), totalAmt=rows.reduce((s,x)=>s+(x.明細金額||0),0), totalGp=rows.reduce((s,x)=>s+(x.明細粗利||0),0);
-      const uuSet=new Set(rows.map(x=>x.CGID).filter(Boolean)); const cntByUser=new Map(); rows.forEach(r=> cntByUser.set(r.CGID,(cntByUser.get(r.CGID)||0)+(r.商品数||0)) );
+      const uuSet=new Set(rows.map(x=> x.CGID).filter(Boolean)); const cntByUser=new Map(); rows.forEach(r=> cntByUser.set(r.CGID,(cntByUser.get(r.CGID)||0)+(r.商品数||0)) );
       const repeatUsers=Array.from(cntByUser.values()).filter(v=>v>=2).length;
       $("prodSummary").innerHTML=`
         <div class="metric">売上点数合計: <span class="kpi-strong">${Math.round(totalQty).toLocaleString()}</span></div>
@@ -613,7 +626,7 @@
     }
 
     // ===== RFM =====
-    function quantiles(arr, qs){ // arr: number[], qs: like [0.2,0.4,0.6,0.8]
+    function quantiles(arr, qs){
       const a = arr.slice().sort((x,y)=>x-y);
       const res = [];
       for (const q of qs){
@@ -626,17 +639,9 @@
       return res;
     }
     function scoreByQuantile(value, cuts, reverse=false){
-      // cuts: [q20,q40,q60,q80]
-      if (cuts.length===2){ // fallback 3段階
-        if (!reverse){
-          if (value <= cuts[0]) return 1;
-          if (value <= cuts[1]) return 3;
-          return 5;
-        }else{
-          if (value <= cuts[0]) return 5;
-          if (value <= cuts[1]) return 3;
-          return 1;
-        }
+      if (cuts.length===2){
+        if (!reverse){ if (value <= cuts[0]) return 1; if (value <= cuts[1]) return 3; return 5; }
+        else         { if (value <= cuts[0]) return 5; if (value <= cuts[1]) return 3; return 1; }
       }
       if (!reverse){
         if (value <= cuts[0]) return 1;
@@ -659,7 +664,6 @@
       if (r>=3 && f>=3) return "一般ユーザー";
       return "離反傾向";
     }
-
     function computeRFM(){
       if (!joined.length){ $("rfmInfo").textContent="先にCSVを取り込んでください。"; $("rfmTable").innerHTML=""; $("rfmExport").disabled=true; Plotly.purge("rfmPie"); Plotly.purge("rfmScatter"); lastRfmRows=null; lastRfmMeta=null; return; }
       const s=$("rfmStart").value, e=$("rfmEnd").value, taxRateSel=Number($("rfmTax").value||"0");
@@ -676,16 +680,15 @@
         o.金額 += (r.明細金額||0);
         if (r.生成時間 && (!o.時刻 || r.生成時間>o.時刻)) o.時刻=r.生成時間;
       }
-      // 顧客集計
+      // 顧客集計（Mは税抜換算）
       const byUser = new Map();
       const taxDiv = taxRateSel>0 ? (1+taxRateSel/100) : 1;
       for (const r of rows){
         const k=r.CGID||"-"; if (!byUser.has(k)) byUser.set(k,{ CGID:k, M:0, GM:0, last:null });
         const u=byUser.get(k);
-        // Mは税抜（商品価格*数量 / (1+税率)）
         const lineEx = (r.明細金額||0) / taxDiv;
         u.M += lineEx;
-        u.GM += (r.明細粗利||0); // 参考：粗利はそのまま
+        u.GM += (r.明細粗利||0);
         if (!u.last || r.生成時間>u.last) u.last=r.生成時間;
       }
       // F: レシート件数
@@ -698,7 +701,7 @@
       const list=[];
       for (const u of byUser.values()){
         if (!u.F) u.F=0;
-        if (!u.last) continue; // 安全策
+        if (!u.last) continue;
         const days = Math.max(0, Math.floor((baseDate - u.last)/(1000*60*60*24)));
         list.push({ CGID:u.CGID, R_days:days, F:u.F, M: u.M, GM: u.GM, last_date: u.last });
       }
@@ -719,7 +722,7 @@
 
       const rowsOut=[];
       for (const x of list){
-        const Rs = scoreByQuantile(x.R_days, cutsR, true);   // 逆スコア
+        const Rs = scoreByQuantile(x.R_days, cutsR, true);
         const Fs = scoreByQuantile(x.F,      cutsF, false);
         const Ms = scoreByQuantile(x.M,      cutsM, false);
         const seg = rfmSegmentName(Rs, Fs, Ms);
@@ -735,8 +738,7 @@
         });
       }
 
-      // サマリ・可視化
-      $("rfmInfo").textContent=`期間: ${s||"-"} ~ ${e||"-"} / 顧客数: ${rowsOut.length.toLocaleString()} / 税率: ${taxRateSel}%（税込→税抜換算に使用）`;
+      $("rfmInfo").textContent=`期間: ${s||"-"} ~ ${e||"-"} / 顧客数: ${rowsOut.length.toLocaleString()} / 税率: ${taxRateSel}%`;
 
       // 円グラフ（セグメント分布）
       const segCount = {};
@@ -745,26 +747,23 @@
       const segValues = segLabels.map(k=>segCount[k]);
       Plotly.newPlot("rfmPie", [{ type:"pie", labels:segLabels, values:segValues, hole:0.35 }], { margin:{l:10,r:10,t:20,b:10}, showlegend:true }, {responsive:true});
 
-      // 散布図（R×F、色=セグメント、サイズ=M）
+      // 散布図（R×F、サイズ=M）
       Plotly.newPlot("rfmScatter", [{
         x: rowsOut.map(r=> r["R（日数）"]),
         y: rowsOut.map(r=> r["F（回）"]),
         text: rowsOut.map(r=> `${r.CGID} / M=${r["M（税抜合計）"]}`),
         mode:"markers",
-        marker:{ size: rowsOut.map(r=> Math.max(6, Math.min(24, r["M（税抜合計）"]/Math.max(1, cutsM[0]||1)))) },
+        marker:{ size: rowsOut.map(r=> Math.max(6, Math.min(24, r["M（税抜合計）"]/Math.max(1, (cutsM[0]||1)))) ) },
         type:"scatter",
         transforms:[{ type:"groupby", groups: rowsOut.map(r=> r.セグメント) }],
       }], { margin:{l:50,r:10,t:10,b:40}, xaxis:{title:"R（日数・小さいほど良）", rangemode:"tozero"}, yaxis:{title:"F（回）", rangemode:"tozero"} }, {responsive:true});
 
-      // テーブル
       renderTable(rowsOut, "rfmTable", ["CGID","R（日数）","F（回）","M（税抜合計）","GM（粗利合計）","Rスコア","Fスコア","Mスコア","セグメント","最終購入日"], null);
 
-      // エクスポート保持
       lastRfmRows = rowsOut;
       lastRfmMeta = { start:s||"", end:e||"", label:"RFM（税抜）", tax: taxRateSel };
       $("rfmExport").disabled = rowsOut.length===0;
     }
-
     function exportRFM(){
       if (!lastRfmRows || !lastRfmRows.length) return;
       const headers = ["CGID","R（日数）","F（回）","M（税抜合計）","GM（粗利合計）","Rスコア","Fスコア","Mスコア","セグメント","最終購入日"];
@@ -814,35 +813,45 @@
     // ===== 初期化 =====
     document.addEventListener("DOMContentLoaded", async ()=>{
       els = {
-        pickTx: $("pickTx"), pickLn: $("pickLn"), pickPm: $("pickPm"),
-        txInput: $("txFile"), lnInput: $("lnFile"), pmInput: $("pmFile"),
-        runBtn: $("runBtn"), status: $("status"), catStatus: $("catStatus"),
+        txInput: $("txFile"),
+        lnInput: $("lnFile"),
+        pmInput: $("pmFile"),
+        runBtn: $("runBtn"),
+        status: $("status"),
+        catStatus: $("catStatus"),
       };
-      els.pickTx?.addEventListener("click", ()=> els.txInput?.click());
-      els.pickLn?.addEventListener("click", ()=> els.lnInput?.click());
-      els.pickPm?.addEventListener("click", ()=> els.pmInput?.click());
+      // label for=... で選択するため、.click() 配線は不要。change でUI更新のみ。
       els.txInput?.addEventListener("change", updateButton);
       els.lnInput?.addEventListener("change", updateButton);
       els.pmInput?.addEventListener("change", updateButton);
 
+      // タブ
       document.querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=> onTabClick(t)));
       bindModals();
 
+      // カテゴリマスタ
       await autoLoadCategory();
+
+      // 取り込み
       els.runBtn?.addEventListener("click", runImport);
 
+      // ベスレポ
       $("bestRun")?.addEventListener("click", computeBestReport);
       $("bestExport")?.addEventListener("click", exportBestCSV);
 
+      // 時間帯
       $("timeRun")?.addEventListener("click", computeTimeReport);
       $("timeExport")?.addEventListener("click", exportTimeCSV);
-      $("timePng")?.addEventListener("click", exportTimePNG);
+      $("timePng")?.addEventListener("click", async ()=>{ await Plotly.downloadImage("timeChart",{format:"png",filename:"time_series"}); });
 
+      // 単品
       $("prodRun")?.addEventListener("click", computeProductReport);
 
+      // RFM
       $("rfmRun")?.addEventListener("click", computeRFM);
       $("rfmExport")?.addEventListener("click", exportRFM);
 
+      // 初期
       updateButton();
     });
   </script>
