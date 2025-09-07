@@ -36,7 +36,8 @@
     .fileline { display:flex; align-items:center; gap:8px; }
     .form-row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:12px; }
     .form-row > div { display:flex; flex-direction:column; gap:6px; }
-    select, input[type="date"] { padding:8px 10px; border:1px solid var(--border); border-radius:8px; min-width:160px; }
+    select, input[type="date"], input[type="text"] { padding:8px 10px; border:1px solid var(--border); border-radius:8px; min-width:160px; }
+    .badge { display:inline-block; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; background:#fafafa; }
   </style>
 </head>
 <body>
@@ -136,7 +137,7 @@
     </div>
   </div>
 
-  <!-- 時間帯集計（今回実装） -->
+  <!-- 時間帯集計 -->
   <div id="timeTab" class="tabcontent">
     <div class="card">
       <h2>時間帯集計（1時間ごと）</h2>
@@ -178,8 +179,39 @@
     </div>
   </div>
 
+  <!-- 単品分析（新規実装） -->
+  <div id="prodTab" class="tabcontent">
+    <div class="card">
+      <h2>単品分析</h2>
+      <div class="form-row">
+        <div>
+          <label>開始日</label>
+          <input type="date" id="prodStart" />
+        </div>
+        <div>
+          <label>終了日</label>
+          <input type="date" id="prodEnd" />
+        </div>
+        <div>
+          <label>JANコード</label>
+          <input type="text" id="prodJan" placeholder="半角JANを入力" />
+        </div>
+        <div class="btn-group">
+          <button id="prodRun" class="btn">この条件で集計</button>
+        </div>
+      </div>
+
+      <div id="prodHeader" class="muted" style="margin-bottom:8px;"></div>
+
+      <div class="metrics" id="prodSummary"></div>
+
+      <div id="prodChart" style="height:320px; margin-top:8px;"></div>
+
+      <div id="prodDiag" class="diag" style="display:none;"></div>
+    </div>
+  </div>
+
   <!-- 以降はプレースホルダ -->
-  <div id="prodTab" class="tabcontent"><div class="card"><p class="muted">単品分析は後続で実装します。</p></div></div>
   <div id="rfmTab" class="tabcontent"><div class="card"><p class="muted">RFM分析は後続で実装します。</p></div></div>
   <div id="segTab" class="tabcontent"><div class="card"><p class="muted">セグメント分析は後続で実装します。</p></div></div>
   <div id="repeatOnlyTab" class="tabcontent"><div class="card"><p class="muted">リピート分析は後続で実装します。</p></div></div>
@@ -453,17 +485,14 @@
           <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
         `;
 
-        // ベスレポ日付
+        // 日付UIの初期値
         if (dMin && dMax){
-          $("bestStart").min = $("bestEnd").min = fmtDate(dMin);
-          $("bestStart").max = $("bestEnd").max = fmtDate(dMax);
-          $("bestStart").value = fmtDate(dMin);
-          $("bestEnd").value   = fmtDate(dMax);
-
-          $("timeStart").min = $("timeEnd").min = fmtDate(dMin);
-          $("timeStart").max = $("timeEnd").max = fmtDate(dMax);
-          $("timeStart").value = fmtDate(dMin);
-          $("timeEnd").value   = fmtDate(dMax);
+          ["best","time","prod"].forEach(prefix=>{
+            $(prefix+"Start").min = $(prefix+"End").min = fmtDate(dMin);
+            $(prefix+"Start").max = $(prefix+"End").max = fmtDate(dMax);
+            $(prefix+"Start").value = fmtDate(dMin);
+            $(prefix+"End").value   = fmtDate(dMax);
+          });
         }
 
         const diag = $("masterDiag");
@@ -492,7 +521,7 @@
       }
     }
 
-    // ===== ベスレポ（既存） =====
+    // ===== ベスレポ =====
     function computeBestReport(){
       if (!joined.length){
         $("bestInfo").textContent = "先にCSVを取り込んでください。";
@@ -588,7 +617,7 @@
       document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
-    // ===== 時間帯集計（新規） =====
+    // ===== 時間帯集計 =====
     function computeTimeReport(){
       if (!joined.length){
         $("timeInfo").textContent = "先にCSVを取り込んでください。";
@@ -618,7 +647,6 @@
         return true;
       });
 
-      // hourバケット 0..23
       const buckets = Array.from({length:24}, (_,h)=>({
         時間帯: `${String(h).padStart(2,"0")}:00`,
         売上金額: 0,
@@ -638,7 +666,6 @@
         if (r.CGID) b._users.add(r.CGID);
       }
 
-      // 派生指標 & 表データ
       const tableRows = buckets.map(b=>{
         const rc = b._receipts.size || 0;
         const basket = rc ? (b.売上点数/rc) : 0;
@@ -655,7 +682,6 @@
         };
       });
 
-      // 折れ線用 Y配列
       const yKeyMap = { amt:"売上金額", receipts:"レシート件数", basket:"バスケットサイズ", aov:"平均客単価" };
       const labelMap = { amt:"売上金額", receipts:"レシート件数", basket:"バスケットサイズ", aov:"平均客単価" };
       const yKey = yKeyMap[metric] || "売上金額";
@@ -674,15 +700,13 @@
         displayModeBar:false
       }, {responsive:true});
 
-      // ランキング（降順）
       const ranking = [...tableRows].sort((a,b)=> b[yKey] - a[yKey]);
 
       $("timeInfo").textContent = `期間: ${s || "-"} ~ ${e || "-"} / 曜日: ${({"all":"すべて","weekday":"平日","weekend":"土日"}[dow])} / 指標: ${label}`;
       renderTable(ranking, "timeTable",
         ["時間帯","売上金額","売上点数","粗利","レシート件数","ユニークユーザー数","バスケットサイズ","平均客単価"], null);
 
-      // エクスポート用保持
-      lastTimeRows = tableRows; // 時間順の表（ランキングでなく時間順のほうが後続利用に親切）
+      lastTimeRows = tableRows;
       lastTimeMeta = { start:s||"", end:e||"", label:`時間帯集計（${label}）`, dow };
       $("timeExport").disabled = lastTimeRows.length===0;
       $("timePng").disabled = false;
@@ -713,12 +737,94 @@
       const a = document.createElement("a"); a.href = url; a.download = fn; document.body.appendChild(a); a.click();
       document.body.removeChild(a); URL.revokeObjectURL(url);
     }
+    async function exportTimePNG(){ await Plotly.downloadImage("timeChart", {format:"png", filename:"time_series"}); }
 
-    async function exportTimePNG(){
-      await Plotly.downloadImage("timeChart", {format:"png", filename:"time_series"});
+    // ===== 単品分析 =====
+    function computeProductReport(){
+      if (!joined.length){
+        $("prodHeader").textContent = "先にCSVを取り込んでください。";
+        $("prodSummary").innerHTML = "";
+        Plotly.purge("prodChart");
+        $("prodDiag").style.display = "none";
+        return;
+      }
+      const s = $("prodStart").value;
+      const e = $("prodEnd").value;
+      const janInput = toNarrow($("prodJan").value).replace(/\s+/g,"");
+      if (!janInput){
+        $("prodHeader").textContent = "JANコードを入力してください。";
+        $("prodSummary").innerHTML = "";
+        Plotly.purge("prodChart");
+        $("prodDiag").style.display = "none";
+        return;
+      }
+
+      const sDate = s ? new Date(s+"T00:00:00") : null;
+      const eDate = e ? new Date(e+"T23:59:59") : null;
+
+      const rows = joined.filter(r=>{
+        if (!r.生成時間) return false;
+        if (sDate && r.生成時間 < sDate) return false;
+        if (eDate && r.生成時間 > eDate) return false;
+        return (toNarrow(r.JANコード).replace(/\s+/g,"") === janInput);
+      });
+
+      const prodName = rows[0]?.商品名 || (masterMap?.get(janInput)?.商品名) || "";
+      const smallCat = rows[0]?.小分類名 || "";
+      $("prodHeader").innerHTML = `期間: ${s || "-"} ~ ${e || "-"} / 対象JAN: <span class="badge">${janInput}</span> ${prodName ? " / 商品名: "+prodName : ""} ${smallCat ? " / 小分類: "+smallCat : ""}`;
+
+      if (!rows.length){
+        $("prodSummary").innerHTML = "<p class='muted'>該当データがありません。</p>";
+        Plotly.purge("prodChart");
+        $("prodDiag").style.display = "none";
+        return;
+      }
+
+      // 指標集計
+      const totalQty = rows.reduce((s,x)=> s + (x.商品数||0), 0);
+      const totalAmt = rows.reduce((s,x)=> s + (x.明細金額||0), 0);
+      const totalGp  = rows.reduce((s,x)=> s + (x.明細粗利||0), 0);
+      const uuSet    = new Set(rows.map(x=> x.CGID).filter(Boolean));
+      // リピート購入者数：同JANを2回以上購入したCGID数（数量合算ベース）
+      const cntByUser = new Map();
+      rows.forEach(r=> cntByUser.set(r.CGID, (cntByUser.get(r.CGID)||0) + (r.商品数||0)));
+      const repeatUsers = Array.from(cntByUser.values()).filter(v=> v>=2).length;
+
+      $("prodSummary").innerHTML = `
+        <div class="metric">売上点数合計: <span class="kpi-strong">${Math.round(totalQty).toLocaleString()}</span></div>
+        <div class="metric">売上金額合計: <span class="kpi-strong">${Math.round(totalAmt).toLocaleString()}</span></div>
+        <div class="metric">粗利額合計: <span class="kpi-strong">${Math.round(totalGp).toLocaleString()}</span></div>
+        <div class="metric">ユニーク購入者数: <span class="kpi-strong">${uuSet.size.toLocaleString()}</span></div>
+        <div class="metric">リピート購入者数: <span class="kpi-strong">${repeatUsers.toLocaleString()}</span></div>
+      `;
+
+      // 売れている時間帯（点数ベース）
+      const buckets = Array.from({length:24}, (_,h)=>({h, qty:0}));
+      rows.forEach(r=>{
+        const h = r.生成時間.getHours();
+        buckets[h].qty += (r.商品数||0);
+      });
+      const x = buckets.map(b=> String(b.h).padStart(2,"0")+":00");
+      const y = buckets.map(b=> Math.round(b.qty));
+
+      Plotly.newPlot("prodChart", [{
+        type:"bar",
+        x, y, name:"売上点数（時間帯）"
+      }], {
+        margin:{l:50,r:10,t:10,b:40},
+        xaxis:{title:"時間帯（時）"},
+        yaxis:{title:"売上点数", rangemode:"tozero"},
+        displayModeBar:false
+      }, {responsive:true});
+
+      // 診断（任意表示）
+      const diag = $("prodDiag");
+      const receiptSet = new Set(rows.map(r=> r.オーダーID));
+      diag.style.display = "block";
+      diag.innerHTML = `明細行: ${rows.length.toLocaleString()} / レシート: ${receiptSet.size.toLocaleString()} / 最小日時: ${fmtDateSlash(minDate(rows))} / 最大日時: ${fmtDateSlash(maxDate(rows))}`;
     }
 
-    // ===== UI wiring =====
+    // ===== UI配線 =====
     function updateButton(){
       const ok = (els.txInput?.files?.length===1 && els.lnInput?.files?.length===1);
       if (els.runBtn) els.runBtn.disabled = !ok;
@@ -781,6 +887,9 @@
       $("timeRun")?.addEventListener("click", computeTimeReport);
       $("timeExport")?.addEventListener("click", exportTimeCSV);
       $("timePng")?.addEventListener("click", exportTimePNG);
+
+      // 単品
+      $("prodRun")?.addEventListener("click", computeProductReport);
 
       // 初期
       updateButton();
