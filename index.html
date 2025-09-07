@@ -4,79 +4,70 @@
   <meta charset="UTF-8" />
   <title>無人店舗分析ツール</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Plotly / PapaParse -->
+  <!-- Plotly / PapaParse（CDN） -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <style>
-    :root { --border:#e5e7eb; --muted:#6b7280; --ink:#111827; }
-    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin:16px; color:var(--ink); }
+    :root { --border:#e5e7eb; --muted:#6b7280; --ink:#111827; --bg:#fff; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin:16px; color:var(--ink); background:var(--bg); }
     .card { border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; background:#fff; }
     .row { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-    .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .full { grid-column:1 / -1; }
     .btn { background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }
     .btn.secondary { background:#374151; }
-    .btn.ghost { background:transparent; color:var(--ink); border:1px solid var(--border); }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
     .btn-group { display:flex; gap:8px; flex-wrap:wrap; }
     label { font-weight:700; display:block; margin-bottom:6px; }
-    input[type="file"], select, input[type="number"], input[type="range"] {
-      padding:8px; border:1px solid var(--border); border-radius:8px; width:100%;
-    }
-    table { width:100%; border-collapse:collapse; }
+    input[type="file"], select, input[type="number"] { padding:8px; border:1px solid var(--border); border-radius:8px; width:100%; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
     th, td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
     .muted { color:var(--muted); font-size:12px; }
-    .error { color:#b91c1c; font-weight:600; white-space:pre-wrap; }
+    .error { color:#b91c1c; font-weight:700; white-space:pre-wrap; }
     .metrics { display:flex; gap:12px; flex-wrap:wrap; margin:8px 0; }
     .metric { border:1px solid var(--border); border-radius:10px; padding:8px 12px; background:#fafafa; }
-    .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .kpi-strong { font-weight:800; font-size:16px; }
     /* tabs */
     .tabs { display:flex; gap:8px; margin:12px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; }
     .tab { padding:10px 12px; border:1px solid var(--border); border-bottom:none; border-radius:8px 8px 0 0; background:#f9fafb; cursor:pointer; }
     .tab.active { background:#fff; font-weight:700; }
     .tabcontent { display:none; }
     .tabcontent.active { display:block; }
-    /* info bubble */
-    .info { display:inline-flex; align-items:center; gap:6px; }
-    .info-btn { width:22px; height:22px; border-radius:50%; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:700; }
-    .modal { position:fixed; inset:0; background:rgba(0,0,0,.2); display:none; align-items:center; justify-content:center; }
-    .modal > .panel { width:min(760px, 92vw); background:#fff; border-radius:12px; border:1px solid var(--border); padding:16px; }
-    .modal.show { display:flex; }
-    .help { border:1px dashed var(--border); border-radius:10px; padding:8px 12px; background:#fcfcfc; }
-    .kpi { display:flex; gap:8px; align-items:center; }
-    .badge { font-size:11px; border:1px solid var(--border); border-radius:999px; padding:2px 8px; background:#fff;}
   </style>
 </head>
 <body>
   <h1>無人店舗分析ツール</h1>
   <p class="muted">データはブラウザ内でのみ処理され、サーバーへ送信されません。</p>
 
-  <!-- 取込（UI刷新） -->
+  <!-- 取込UI -->
   <div class="card">
     <label style="margin-bottom:10px;">csv取り込み</label>
     <div class="btn-group" style="margin-bottom:8px;">
       <button id="pickTx" class="btn">取引毎</button>
       <button id="pickLn" class="btn">商品毎</button>
-      <button id="pickPm" class="btn secondary">商品マスタ</button>
+    </div>
+    <div class="btn-group" style="margin-bottom:8px;">
+      <button id="pickPm" class="btn secondary">商品マスタ取り込み(csv)</button>
+      <span id="status" class="muted" style="align-self:center;">CSVを2つ選択してください</span>
     </div>
 
-    <!-- 実体のfile inputは非表示（ボタンで開く） -->
+    <!-- 実体の file input（非表示） -->
     <input id="txFile" type="file" accept=".csv" style="display:none;" />
     <input id="lnFile" type="file" accept=".csv" style="display:none;" />
     <input id="pmFile" type="file" accept=".csv" style="display:none;" />
 
-    <div class="actions" style="margin-top:12px;">
-      <button id="runBtn" class="btn" disabled>集計実行</button>
+    <div class="btn-group" style="margin-top:12px;">
+      <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
     </div>
     <p class="muted" style="margin-top:8px;">
-      商品マスタ：列例）JAN / 商品名 / カテゴリー中分類 / カテゴリー小分類 / 原価（粗利計算用）
+      商品マスタの列：<code>JAN</code> / <code>商品名</code> / <code>原価</code> / <code>カテゴリー：小分類コード</code> / <code>カテゴリー：小分類名</code>
+      （小分類コードは最大6桁を想定）
     </p>
   </div>
 
-  <!-- タブ（指定の8分類） -->
+  <!-- タブ -->
   <div class="tabs">
     <div class="tab active" data-tab="previewTab">取り込みデータsummary</div>
-    <div class="tab" data-tab="buyTab">ベスレポ集計</div>
+    <div class="tab" data-tab="bestTab">ベスレポ集計</div>
     <div class="tab" data-tab="timeTab">時間帯集計</div>
     <div class="tab" data-tab="prodTab">単品分析</div>
     <div class="tab" data-tab="rfmTab">RFM分析</div>
@@ -89,271 +80,36 @@
   <div id="previewTab" class="tabcontent active">
     <div class="card">
       <h2>取り込みサマリー</h2>
-      <div class="metrics" id="summary"></div>
-      <div id="preview" style="margin-top:8px;"></div>
-    </div>
-  </div>
-
-  <!-- RFM / セグメント（既存機能はRFMタブに集約） -->
-  <div id="rfmTab" class="tabcontent">
-    <div class="card row">
-      <div>
-        <label>R/F/M 分割数（パーセンタイル）</label>
-        <select id="binCount">
-          <option value="3">3分割（低/中/高）</option>
-          <option value="4" selected>4分割（四分位）</option>
-          <option value="5">5分割（五分位）</option>
-        </select>
-      </div>
-      <div>
-        <label>テーブル表示件数（上位N）</label>
-        <input type="number" id="topN" min="10" max="1000" value="50" />
-      </div>
-      <div class="full actions">
-        <div class="info">
-          <button id="openDef" class="info-btn">i</button>
-          <span class="muted">セグメント定義を確認</span>
-        </div>
-        <button id="recalcBtn" class="btn">再計算（セグメント反映）</button>
-      </div>
-    </div>
-
-    <div class="card row">
-      <div id="segPie" class="full" style="height:420px;"></div>
-      <div id="rfHeat" class="full" style="height:420px;"></div>
-      <div id="scoreBars" class="full" style="height:360px;"></div>
-      <div class="full">
-        <h3 style="margin:8px 0 6px;">セグメント別サンプル（各最大3件）</h3>
-        <div id="rfmSample"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- セグメント分析（現状はRFMと同内容を参照・後で独立させます） -->
-  <div id="segTab" class="tabcontent">
-    <div class="card">
-      <p class="muted" style="margin-top:0;">
-        ※現在は <b>RFM分析</b> と同じ内容を参照しています。閾値UIやセグメント別KPIの深掘りは、このタブに切り出して実装します。
-      </p>
-      <div id="segMirror" class="muted">（RFMタブを参照してください）</div>
-    </div>
-  </div>
-
-  <!-- ベスレポ集計（＝既存の購買分析を掲出） -->
-  <div id="buyTab" class="tabcontent">
-    <div class="card row">
-      <div>
-        <label>対象セグメント</label>
-        <select id="segFilter"></select>
-      </div>
-      <div>
-        <label>ランキング基準</label>
-        <select id="rankMetric">
-          <option value="qty" selected>数量（合計商品数）</option>
-          <option value="rev">金額（明細金額合計）</option>
-        </select>
-      </div>
-      <div>
-        <label>Top N</label>
-        <input type="number" id="rankTopN" min="5" max="200" value="20" />
-      </div>
-      <div class="full actions">
-        <button id="runRank" class="btn">単品ランキングを集計</button>
-      </div>
-    </div>
-
-    <div class="card row">
-      <div id="rankTable" class="full"></div>
-      <div id="rankBar" class="full" style="height:420px;"></div>
-    </div>
-
-    <div class="card">
-      <div class="kpi">
-        <h3 style="margin:0;">併売ランキング（A→B）</h3>
-        <span class="badge">同時購入率=Support</span>
-        <span class="badge">A購入者のうち割合=Confidence</span>
-        <span class="badge">基準比=Lift</span>
-      </div>
-      <div class="grid2" style="margin-top:8px;">
-        <div>
-          <label>min 同時購入率（% / 全取引）</label>
-          <input type="number" id="minSup" min="0" max="100" value="0.5" />
-        </div>
-        <div>
-          <label>min A購入者のうち割合（%）</label>
-          <input type="number" id="minConf" min="0" max="100" value="10" />
-        </div>
-        <div>
-          <label>min 基準比（Lift）</label>
-          <input type="number" id="minLift" step="0.01" min="0" value="1.1" />
-        </div>
-        <div>
-          <label>Top N</label>
-          <input type="number" id="pairTopN" min="10" max="200" value="50" />
-        </div>
-      </div>
-      <div class="actions" style="margin-top:8px;">
-        <button id="runPairs" class="btn">併売を集計</button>
-        <span class="muted">※計算量対策：出現10件未満のSKUは自動除外・1バスケット50品まで</span>
-      </div>
-      <div id="pairTable" class="full"></div>
-    </div>
-  </div>
-
-  <!-- 時間帯集計 -->
-  <div id="timeTab" class="tabcontent">
-    <div class="card row">
-      <div>
-        <label>時間帯（0〜23時）</label>
-        <select id="hourSelect"></select>
-      </div>
-      <div>
-        <label>ランキング基準</label>
-        <select id="hourMetric">
-          <option value="qty" selected>数量（合計商品数）</option>
-          <option value="rev">金額（明細金額合計）</option>
-        </select>
-      </div>
-      <div>
-        <label>Top N</label>
-        <input type="number" id="hourTopN" min="5" max="200" value="20" />
-      </div>
-      <div class="full actions">
-        <button id="runHourRank" class="btn">時間帯別・単品ランキング</button>
-      </div>
-    </div>
-
-    <div class="card row">
-      <div id="hourRankTable" class="full"></div>
-      <div id="hourRankBar" class="full" style="height:420px;"></div>
-    </div>
-
-    <div class="card">
-      <div class="kpi">
-        <h3 style="margin:0;">時間帯別・併売ランキング（A→B）</h3>
-        <span class="badge">同時購入率</span>
-        <span class="badge">A購入者のうち割合</span>
-        <span class="badge">基準比（Lift）</span>
-      </div>
-      <div class="grid2" style="margin-top:8px;">
-        <div>
-          <label>min 同時購入率（% / 当該時間帯の全取引）</label>
-          <input type="number" id="hMinSup" min="0" max="100" value="0.5" />
-        </div>
-        <div>
-          <label>min A購入者のうち割合（%）</label>
-          <input type="number" id="hMinConf" min="0" max="100" value="10" />
-        </div>
-        <div>
-          <label>min 基準比（Lift）</label>
-          <input type="number" id="hMinLift" step="0.01" min="0" value="1.1" />
-        </div>
-        <div>
-          <label>Top N</label>
-          <input type="number" id="hPairTopN" min="10" max="200" value="50" />
-        </div>
-      </div>
-      <div class="actions" style="margin-top:8px;">
-        <button id="runHourPairs" class="btn">時間帯別・併売を集計</button>
-        <span class="muted">※UIDは使用しません。出現10件未満のSKUは自動除外・1バスケット50品まで。</span>
-      </div>
-      <div id="hourPairTable" class="full"></div>
-    </div>
-  </div>
-
-  <!-- 単品分析（＝人気/リピートの集計画面） -->
-  <div id="prodTab" class="tabcontent">
-    <div class="card row">
-      <div>
-        <label>対象セグメント</label>
-        <select id="segFilter2"></select>
-      </div>
-      <div>
-        <label>Top N</label>
-        <input type="number" id="prodTopN" min="5" max="200" value="20" />
-      </div>
-      <div class="full help">
-        <b>定義</b>：  
-        <ul style="margin:6px 0 0 18px;">
-          <li><b>最もリピートされている商品</b>…同一顧客が<strong>異なる注文で2回以上</strong>購入したユニーク顧客数</li>
-          <li><b>人気商品</b>…<strong>ユニーク購入者数</strong>が多い順</li>
-        </ul>
-      </div>
-      <div class="full actions">
-        <button id="runRepeat" class="btn">リピート商品を集計</button>
-        <button id="runPopular" class="btn secondary">人気商品を集計</button>
-      </div>
-    </div>
-
-    <div class="card row">
-      <div class="full">
-        <h3 style="margin-top:0;">最もリピートされている商品（ユニークリピーター数順）</h3>
-        <div id="repeatTable"></div>
+      <div class="metrics" id="summary">
+        <!-- KPIを描画 -->
       </div>
       <div class="full">
-        <h3>人気商品（ユニーク購入者数順）</h3>
-        <div id="popularTable"></div>
+        <div id="preview" class="muted">（先頭50行プレビューを表示）</div>
       </div>
     </div>
   </div>
 
-  <!-- リピート分析（現状は単品分析タブの結果を参照） -->
-  <div id="repeatOnlyTab" class="tabcontent">
-    <div class="card">
-      <p class="muted">※現在は <b>単品分析</b> タブで「リピート商品を集計」を実行してご確認ください。専用ビューはこのタブに実装予定です。</p>
-    </div>
-  </div>
-
-  <!-- 併売分析（現状はベスレポ集計タブの結果を参照） -->
-  <div id="pairOnlyTab" class="tabcontent">
-    <div class="card">
-      <p class="muted">※現在は <b>ベスレポ集計</b> タブ下部の「併売ランキング」をご利用ください。セグメント別・時間帯別の専用ビューはこのタブに統合予定です。</p>
-    </div>
-  </div>
-
-  <!-- セグメント定義モーダル -->
-  <div id="defModal" class="modal">
-    <div class="panel">
-      <div class="actions" style="justify-content:space-between;">
-        <h3 style="margin:0;">セグメント定義（デフォルト）</h3>
-        <button id="closeDef" class="btn ghost">閉じる</button>
-      </div>
-      <p class="muted">Rは小さいほど良い、F/Mは大きいほど良い前提でスコア化（1..bin）。</p>
-      <ul>
-        <li><b>ロイヤル</b>：R≥3 かつ F≥3 かつ M≥3</li>
-        <li><b>優良</b>：R≥3 かつ (F≥3 または M≥3)</li>
-        <li><b>新規/育成</b>：R≥3 かつ F≤2 かつ M≤2</li>
-        <li><b>離反懸念</b>：R=1 かつ (F≥3 または M≥3)</li>
-        <li><b>休眠</b>：R=1 かつ F≤2 かつ M≤2</li>
-        <li><b>準ロイヤル</b>：RFMスコア ≥ 10</li>
-        <li><b>一般</b>：RFMスコア ≥ 7（上記以外）</li>
-        <li><b>要観察</b>：その他</li>
-      </ul>
-      <p class="muted">※ 社内定義に合わせてカスタマイズ可能です。</p>
-    </div>
-  </div>
+  <!-- 以降のタブは後続で実装 -->
+  <div id="bestTab" class="tabcontent"><div class="card"><p class="muted">ベスレポ集計は後続で実装します。</p></div></div>
+  <div id="timeTab" class="tabcontent"><div class="card"><p class="muted">時間帯集計は後続で実装します。</p></div></div>
+  <div id="prodTab" class="tabcontent"><div class="card"><p class="muted">単品分析は後続で実装します。</p></div></div>
+  <div id="rfmTab" class="tabcontent"><div class="card"><p class="muted">RFM分析は後続で実装します。</p></div></div>
+  <div id="segTab" class="tabcontent"><div class="card"><p class="muted">セグメント分析は後続で実装します。</p></div></div>
+  <div id="repeatOnlyTab" class="tabcontent"><div class="card"><p class="muted">リピート分析は後続で実装します。</p></div></div>
+  <div id="pairOnlyTab" class="tabcontent"><div class="card"><p class="muted">併売分析は後続で実装します。</p></div></div>
 
   <script>
     // ===== ユーティリティ =====
     const $ = (id) => document.getElementById(id);
     const txInput = $("txFile"), lnInput = $("lnFile"), pmInput = $("pmFile");
-    const runBtn  = $("runBtn"), statusEl = $("status");
+    const runBtn  = $("runBtn"), statusEl= $("status");
 
-    // ボタンで file input を開く
+    // ボタン→ファイル選択
     $("pickTx").addEventListener("click", ()=> txInput.click());
     $("pickLn").addEventListener("click", ()=> lnInput.click());
     $("pickPm").addEventListener("click", ()=> pmInput.click());
 
-    function updateButton() {
-      runBtn.disabled = !(txInput.files.length === 1 && lnInput.files.length === 1);
-      statusEl.className = "muted";
-      statusEl.textContent = runBtn.disabled ? "CSVを2つ選択してください" : "準備OK。取り込み＆集計できます。";
-    }
-    txInput.addEventListener("change", updateButton);
-    lnInput.addEventListener("change", updateButton);
-    pmInput.addEventListener("change", ()=>{ /* 次ステップで利用 */ });
-
-    function normalizeHeader(h){ return String(h || "").replace(/\ufeff/g,"").trim(); }
+    function normalizeHeader(h){ return String(h||"").replace(/\ufeff/g,"").trim(); }
     function parseCSVFile(file){
       return new Promise((resolve,reject)=>{
         Papa.parse(file, {
@@ -369,8 +125,17 @@
         });
       });
     }
-    function parseDate(s){ if(!s) return null; const t=String(s).trim().replace(/\s+/g," "); const d=new Date(t); return isNaN(d.getTime())?null:d; }
-    function toNumber(x, def=0){ const v=Number(String(x).replace(/,/g,"").trim()); return isNaN(v)?def:v; }
+    function toNumber(x, def=0){
+      if (x === null || x === undefined) return def;
+      const v = Number(String(x).replace(/,/g,"").trim());
+      return isNaN(v) ? def : v;
+    }
+    function parseDate(s){
+      if(!s) return null;
+      const t = String(s).trim().replace(/\s+/g," "); // 「2025/8/5  21:53:13」に耐性
+      const d = new Date(t);
+      return isNaN(d.getTime()) ? null : d;
+    }
     function fmtDate(d){ if(!d) return "-"; const m=d.getMonth()+1, day=d.getDate(); return `${d.getFullYear()}/${m}/${day}`; }
     function minDate(arr){ return arr.reduce((a,r)=>(!a||r.生成時間<a? r.生成時間:a), null); }
     function maxDate(arr){ return arr.reduce((a,r)=>(!a||r.生成時間>a? r.生成時間:a), null); }
@@ -381,457 +146,172 @@
       const headers = cols || Object.keys(rows[0]);
       let html = "<table><thead><tr>";
       headers.forEach(h=> html += `<th>${h}</th>`); html += "</tr></thead><tbody>";
-      rows.slice(0,max).forEach(r=>{ html += "<tr>"; headers.forEach(h=> html += `<td>${r[h]??""}</td>`); html += "</tr>"; });
-      html += "</tbody></table>"; el.innerHTML = html;
-    }
-    function pie(elId, labels, values, title){
-      Plotly.newPlot(elId, [{labels,values,type:"pie",hole:.45}], {title, margin:{l:24,r:24,t:40,b:24}}, {displayModeBar:false});
+      rows.slice(0, max).forEach(r=>{
+        html += "<tr>";
+        headers.forEach(h=> html += `<td>${r[h] ?? ""}</td>`);
+        html += "</tr>";
+      });
+      html += "</tbody></table>";
+      el.innerHTML = html;
     }
 
-    // ===== グローバル =====
+    function updateButton(){
+      const ok = (txInput.files.length===1 && lnInput.files.length===1);
+      runBtn.disabled = !ok;
+      statusEl.className = "muted";
+      statusEl.textContent = ok ? "準備OK。取り込み＆集計できます。" : "CSVを2つ選択してください";
+    }
+    txInput.addEventListener("change", updateButton);
+    lnInput.addEventListener("change", updateButton);
+    pmInput.addEventListener("change", ()=>{/* 任意 */});
+
+    // ===== 状態 =====
     let joined = [];   // JOIN済み明細
-    let rfm = [];      // RFM + セグメント
-    let rankRows = []; // 単品ランキング
-    let pairRows = []; // 併売
-    let repeatRows = [];
-    let popularRows = [];
-    let hourRankRows = [];
-    let hourPairRows = [];
+    let masterMap = null; // JAN -> {商品名, 原価, 小分類コード, 小分類名}
 
-    // ===== RFM =====
-    function computeRFM(joinedArr, bin=4){
-      if (!joinedArr.length) return [];
-      const maxDt = joinedArr.reduce((a,r)=> r.生成時間>a? r.生成時間:a, new Date(0));
-      const ref = new Date(maxDt.getTime() + 24*60*60*1000);
+    // ===== 取り込み & JOIN & サマリー =====
+    async function runImport(){
+      runBtn.disabled = true;
+      statusEl.className = "muted";
+      statusEl.textContent = "取り込み中…";
 
-      const byCust = new Map();
-      for(const r of joinedArr){
-        const key=r.CGID;
-        if(!byCust.has(key)) byCust.set(key, {CGID:key,last:r.生成時間,freqSet:new Set([r.オーダーID]),money:0});
-        const o=byCust.get(key);
-        if(r.生成時間>o.last) o.last=r.生成時間; o.freqSet.add(r.オーダーID); o.money += r.明細金額;
-      }
-
-      const rows=[];
-      for(const o of byCust.values()){
-        rows.push({CGID:o.CGID, Recency日:Math.floor((ref-o.last)/(86400000)), Frequency回数:o.freqSet.size, Monetary金額:o.money});
-      }
-
-      function score(arr, ascGood){
-        const sorted = [...arr].sort((a,b)=>a-b);
-        const step = 1/bin;
-        return arr.map(v=>{
-          const idx = sorted.findIndex(x=>x===v); const pct = (idx+1)/sorted.length;
-          const p = ascGood? (1-pct): pct;
-          for(let i=1;i<=bin;i++) if(p<=i*step) return i; return bin;
-        });
-      }
-      const Rs = score(rows.map(r=>r.Recency日), true);
-      const Fs = score(rows.map(r=>r.Frequency回数), false);
-      const Ms = score(rows.map(r=>r.Monetary金額), false);
-
-      rows.forEach((r,i)=>{ r["Rスコア"]=Rs[i]; r["Fスコア"]=Fs[i]; r["Mスコア"]=Ms[i]; r["RFMスコア"]=Rs[i]+Fs[i]+Ms[i]; });
-      return rows;
-    }
-    function segmentize(rows){
-      return rows.map(r=>{
-        const rs=r["Rスコア"], fs=r["Fスコア"], ms=r["Mスコア"], t=r["RFMスコア"];
-        let seg="要観察";
-        if (rs>=3 && fs>=3 && ms>=3) seg="ロイヤル";
-        else if (rs>=3 && (fs>=3 || ms>=3)) seg="優良";
-        else if (rs>=3 && fs<=2 && ms<=2) seg="新規/育成";
-        else if (rs===1 && (fs>=3 || ms>=3)) seg="離反懸念";
-        else if (rs===1 && fs<=2 && ms<=2) seg="休眠";
-        else if (t>=10) seg="準ロイヤル";
-        else if (t>=7) seg="一般";
-        r["セグメント"]=seg; return r;
-      });
-    }
-    function renderRFM(topN=50){
-      // セグメント円
-      const segCounts = {}; rfm.forEach(r=> segCounts[r.セグメント]=(segCounts[r.セグメント]||0)+1);
-      const labels = Object.keys(segCounts), values = labels.map(k=>segCounts[k]); pie("segPie", labels, values, "セグメント構成（人数）");
-
-      // RFヒート
-      const map = new Map(); let maxR=0,maxF=0;
-      rfm.forEach(r=>{ const R=r["Rスコア"],F=r["Fスコア"]; maxR=Math.max(maxR,R); maxF=Math.max(maxF,F); const k=`${R}-${F}`; map.set(k,(map.get(k)||0)+1);});
-      const z=[], x=[], y=[]; for(let f=1;f<=maxF;f++) y.push(`F${f}`); for(let r=1;r<=maxR;r++) x.push(`R${r}`);
-      for(let f=1;f<=maxF;f++){ const row=[]; for(let r=1;r<=maxR;r++) row.push(map.get(`${r}-${f}`)||0); z.push(row); }
-      Plotly.newPlot("rfHeat", [{z,x,y,type:"heatmap",colorscale:"Blues"}], {title:"R×F ヒートマップ（人数）",margin:{l:48,r:24,t:40,b:40}}, {displayModeBar:false});
-
-      // スコア分布
-      const cnt=(k)=>{const c={}; rfm.forEach(r=>{const v=r[k]; c[v]=(c[v]||0)+1;}); return c;};
-      const rC=cnt("Rスコア"), fC=cnt("Fスコア"), mC=cnt("Mスコア");
-      Plotly.newPlot("scoreBars",[
-        {x:Object.keys(rC), y:Object.values(rC), type:"bar", name:"R"},
-        {x:Object.keys(fC), y:Object.values(fC), type:"bar", name:"F"},
-        {x:Object.keys(mC), y:Object.values(mC), type:"bar", name:"M"}],
-        {barmode:"group", title:"R/F/M スコア分布", margin:{l:48,r:24,t:40,b:40}}, {displayModeBar:false});
-
-      // セグメントごとサンプル（各3件）
-      const bySeg = new Map();
-      rfm.forEach(r=> { if(!bySeg.has(r.セグメント)) bySeg.set(r.セグメント,[]); bySeg.get(r.セグメント).push(r); });
-      let samples=[]; for(const [seg,rows] of bySeg.entries()){
-        const shuffled = rows.slice().sort(()=>Math.random()-0.5).slice(0,3);
-        samples = samples.concat(shuffled);
-      }
-      samples = samples.slice(0, topN);
-      renderTable(samples, "rfmSample",
-        ["CGID","Recency日","Frequency回数","Monetary金額","Rスコア","Fスコア","Mスコア","RFMスコア","セグメント"], samples.length);
-
-      // プレビュータブのサマリーも更新
-      const uids = new Set(rfm.map(d=>d.CGID)).size;
-      $("summary").innerHTML = `
-        <div class="metric">顧客数: <b>${uids.toLocaleString()}</b></div>
-        <div class="metric">レシート件数: <b>${new Set(joined.map(r=>r.オーダーID)).size.toLocaleString()}</b></div>
-        <div class="metric">期間: <b>${fmtDate(minDate(joined))} – ${fmtDate(maxDate(joined))}</b></div>
-        <div class="metric">購入単品数合計: <b>${joined.reduce((s,r)=>s+(r.商品数||0),0).toLocaleString()}</b></div>
-      `;
-    }
-
-    // ===== ランキング（セグメント軸） =====
-    function buildSegOptions(){
-      const segs = Array.from(new Set(rfm.map(r=>r.セグメント))).sort();
-      const html = `<option value="ALL" selected>すべて</option>` + segs.map(s=>`<option value="${s}">${s}</option>`).join("");
-      $("segFilter").innerHTML = html;
-      $("segFilter2").innerHTML = html;
-    }
-    function filteredRowsBySeg(seg){
-      if(seg==="ALL") return joined;
-      const uidSet = new Set(rfm.filter(r=>r.セグメント===seg).map(r=>r.CGID));
-      return joined.filter(r=> uidSet.has(r.CGID));
-    }
-    function runRanking(){
-      const seg = $("segFilter").value, metric = $("rankMetric").value, top = Number($("rankTopN").value);
-      const rows = filteredRowsBySeg(seg);
-
-      const agg = new Map();
-      rows.forEach(r=>{
-        const key=r.JANコード;
-        if(!agg.has(key)) agg.set(key,{JANコード:key, 商品名:r.商品名, 数量:0, 金額:0});
-        const o=agg.get(key); o.数量 += (r.商品数||0); o.金額 += (r.明細金額||0);
-      });
-      let arr=[...agg.values()];
-      arr.sort((a,b)=> metric==="qty" ? b.数量-a.数量 : b.金額-a.金額);
-      rankRows = arr.slice(0, top);
-
-      renderTable(rankRows, "rankTable", ["JANコード","商品名","数量","金額"], top);
-      const x = rankRows.map(r=>`${r.商品名}`), y = rankRows.map(r=> metric==="qty"? r.数量 : r.金額);
-      Plotly.newPlot("rankBar", [{x, y, type:"bar"}],
-        {title:`${seg==="ALL"?"全体":seg}｜単品ランキング（${metric==="qty"?"数量":"金額"}）`, margin:{l:48,r:24,t:40,b:80}}, {displayModeBar:false});
-    }
-
-    // 併売（セグメント軸）
-    function runCooccurrence(){
-      const seg = $("segFilter").value;
-      const rows = filteredRowsBySeg(seg);
-
-      const baskets = new Map();
-      for(const r of rows){
-        const k = r.オーダーID;
-        if(!baskets.has(k)) baskets.set(k, new Set());
-        const set = baskets.get(k);
-        if (set.size < 50) set.add(r.JANコード);
-      }
-      const total = baskets.size || 1;
-
-      const cntA = new Map();
-      for(const set of baskets.values()) for(const A of set) cntA.set(A, (cntA.get(A)||0)+1);
-      const minAppear = 10;
-      const valid = new Set([...cntA.entries()].filter(([k,v])=>v>=minAppear).map(([k])=>k));
-
-      const cntPair = new Map();
-      for(const set of baskets.values()){
-        const arr = [...set].filter(x=>valid.has(x));
-        for(let i=0;i<arr.length;i++){
-          const A=arr[i];
-          for(let j=0;j<arr.length;j++){
-            if(i===j) continue;
-            const B=arr[j];
-            const key=`${A}||${B}`;
-            cntPair.set(key,(cntPair.get(key)||0)+1);
-          }
-        }
-      }
-
-      const nameByJAN = new Map(); rows.forEach(r=> { if(!nameByJAN.has(r.JANコード)) nameByJAN.set(r.JANコード, r.商品名); });
-
-      const minSup = Number($("minSup").value)/100.0;
-      const minConf = Number($("minConf").value)/100.0;
-      const minLift = Number($("minLift").value);
-      const topN = Number($("pairTopN").value);
-
-      const arr=[];
-      for(const [k,cAB] of cntPair.entries()){
-        const [A,B]=k.split("||"); const cA=cntA.get(A)||0, cB=cntA.get(B)||0;
-        if (cA===0 || cB===0) continue;
-        const sup = cAB/total, conf = cAB/cA, lift = conf/ (cB/total);
-        if (sup>=minSup && conf>=minConf && lift>=minLift){
-          arr.push({
-            A_JAN:A, A_商品名:nameByJAN.get(A)||A,
-            B_JAN:B, B_商品名:nameByJAN.get(B)||B,
-            同時購入回数:cAB, 同時購入率:+sup.toFixed(4), A購入者のうち割合:+conf.toFixed(4), 基準比:+lift.toFixed(4)
-          });
-        }
-      }
-      arr.sort((a,b)=> b.基準比-a.基準比 || b.A購入者のうち割合-a.A購入者のうち割合 || b.同時購入回数-a.同時購入回数);
-      pairRows = arr.slice(0, topN);
-
-      renderTable(pairRows, "pairTable",
-        ["A_JAN","A_商品名","B_JAN","B_商品名","同時購入回数","同時購入率","A購入者のうち割合","基準比"], topN);
-    }
-
-    // 商品ランキング（人気/リピート）
-    function filteredRowsBySegForProd(seg){ return filteredRowsBySeg(seg); }
-    function runRepeatRanking(){
-      const seg = $("segFilter2").value, top = Number($("prodTopN").value);
-      const rows = filteredRowsBySegForProd(seg);
-
-      const orderSetByJanUser = new Map();
-      for(const r of rows){
-        const key = `${r.JANコード}||${r.CGID}`;
-        if(!orderSetByJanUser.has(key)) orderSetByJanUser.set(key, new Set());
-        orderSetByJanUser.get(key).add(r.オーダーID);
-      }
-      const janToRepeatUsers = new Map();
-      const janName = new Map();
-      for(const [k,set] of orderSetByJanUser.entries()){
-        const [jan,cgid] = k.split("||");
-        if(!janName.has(jan)){
-          const row = rows.find(x=>x.JANコード===jan);
-          janName.set(jan, row ? row.商品名 : jan);
-        }
-        if(set.size >= 2){
-          if(!janToRepeatUsers.has(jan)) janToRepeatUsers.set(jan, new Set());
-          janToRepeatUsers.get(jan).add(cgid);
-        }
-      }
-      const janToBuyers = new Map();
-      for(const r of rows){
-        if(!janToBuyers.has(r.JANコード)) janToBuyers.set(r.JANコード,new Set());
-        janToBuyers.get(r.JANコード).add(r.CGID);
-      }
-      const arr=[];
-      for(const [jan, set] of janToRepeatUsers.entries()){
-        arr.push({ JANコード: jan, 商品名: janName.get(jan) || jan, リピーター数: set.size,
-          ユニーク購入者数: (janToBuyers.get(jan)||new Set()).size });
-      }
-      arr.sort((a,b)=> b.リピーター数 - a.リピーター数 || b.ユニーク購入者数 - a.ユニーク購入者数);
-      repeatRows = arr.slice(0, top);
-      renderTable(repeatRows, "repeatTable", ["JANコード","商品名","リピーター数","ユニーク購入者数"], top);
-    }
-    function runPopularRanking(){
-      const seg = $("segFilter2").value, top = Number($("prodTopN").value);
-      const rows = filteredRowsBySegForProd(seg);
-
-      const janToBuyers = new Map(); const janName = new Map();
-      for(const r of rows){
-        if(!janToBuyers.has(r.JANコード)) janToBuyers.set(r.JANコード, new Set());
-        janToBuyers.get(r.JANコード).add(r.CGID);
-        if(!janName.has(r.JANコード)) janName.set(r.JANコード, r.商品名);
-      }
-      const arr=[];
-      for(const [jan,set] of janToBuyers.entries()){
-        arr.push({ JANコード: jan, 商品名: janName.get(jan) || jan, ユニーク購入者数: set.size });
-      }
-      arr.sort((a,b)=> b.ユニーク購入者数 - a.ユニーク購入者数);
-      popularRows = arr.slice(0, top);
-      renderTable(popularRows, "popularTable", ["JANコード","商品名","ユニーク購入者数"], top);
-    }
-
-    // ===== 時間帯分析 =====
-    function buildHourOptions(){
-      const sel = $("hourSelect");
-      sel.innerHTML = Array.from({length:24}, (_,h)=>`<option value="${h}">${h}:00台</option>`).join("");
-      sel.value = "12";
-    }
-    function rowsOfHour(h){
-      const hour = Number(h);
-      return joined.filter(r => r.生成時間 && r.生成時間.getHours()===hour);
-    }
-    function runHourlyProductRanking(){
-      const hour = Number($("hourSelect").value), metric = $("hourMetric").value, top = Number($("hourTopN").value);
-      const rows = rowsOfHour(hour);
-
-      const agg = new Map();
-      rows.forEach(r=>{
-        const key=r.JANコード;
-        if(!agg.has(key)) agg.set(key,{JANコード:key, 商品名:r.商品名, 数量:0, 金額:0});
-        const o=agg.get(key); o.数量 += (r.商品数||0); o.金額 += (r.明細金額||0);
-      });
-      let arr=[...agg.values()];
-      arr.sort((a,b)=> metric==="qty" ? b.数量-a.数量 : b.金額-a.金額);
-      hourRankRows = arr.slice(0, top);
-
-      renderTable(hourRankRows, "hourRankTable", ["JANコード","商品名","数量","金額"], top);
-      const x = hourRankRows.map(r=>`${r.商品名}`), y = hourRankRows.map(r=> metric==="qty"? r.数量 : r.金額);
-      Plotly.newPlot("hourRankBar", [{x, y, type:"bar"}],
-        {title:`${hour}:00台｜単品ランキング（${metric==="qty"?"数量":"金額"}）`, margin:{l:48,r:24,t:40,b:80}}, {displayModeBar:false});
-    }
-    function runHourlyPairs(){
-      const hour = Number($("hourSelect").value);
-      const rows = rowsOfHour(hour);
-
-      const baskets = new Map();
-      for(const r of rows){
-        const k = r.オーダーID;
-        if(!baskets.has(k)) baskets.set(k, new Set());
-        const set = baskets.get(k);
-        if (set.size < 50) set.add(r.JANコード);
-      }
-      const total = baskets.size || 1;
-
-      const cntA = new Map();
-      for(const set of baskets.values()) for(const A of set) cntA.set(A, (cntA.get(A)||0)+1);
-      const minAppear = 10;
-      const valid = new Set([...cntA.entries()].filter(([k,v])=>v>=minAppear).map(([k])=>k));
-
-      const cntPair = new Map();
-      for(const set of baskets.values()){
-        const arr = [...set].filter(x=>valid.has(x));
-        for(let i=0;i<arr.length;i++){
-          const A=arr[i];
-          for(let j=0;j<arr.length;j++){
-            if(i===j) continue;
-            const B=arr[j];
-            const key=`${A}||${B}`;
-            cntPair.set(key,(cntPair.get(key)||0)+1);
-          }
-        }
-      }
-
-      const nameByJAN = new Map(); rows.forEach(r=> { if(!nameByJAN.has(r.JANコード)) nameByJAN.set(r.JANコード, r.商品名); });
-
-      const minSup = Number($("hMinSup").value)/100.0;
-      const minConf = Number($("hMinConf").value)/100.0;
-      const minLift = Number($("hMinLift").value);
-      const topN = Number($("hPairTopN").value);
-
-      const arr=[];
-      for(const [k,cAB] of cntPair.entries()){
-        const [A,B]=k.split("||"); const cA=cntA.get(A)||0, cB=cntA.get(B)||0;
-        if (cA===0 || cB===0) continue;
-        const sup = cAB/total, conf = cAB/cA, lift = conf/ (cB/total);
-        if (sup>=minSup && conf>=minConf && lift>=minLift){
-          arr.push({
-            A_JAN:A, A_商品名:nameByJAN.get(A)||A,
-            B_JAN:B, B_商品名:nameByJAN.get(B)||B,
-            同時購入回数:cAB, 同時購入率:+sup.toFixed(4), A購入者のうち割合:+conf.toFixed(4), 基準比:+lift.toFixed(4)
-          });
-        }
-      }
-      arr.sort((a,b)=> b.基準比-a.基準比 || b.A購入者のうち割合-a.A購入者のうち割合 || b.同時購入回数-a.同時購入回数);
-      hourPairRows = arr.slice(0, topN);
-
-      renderTable(hourPairRows, "hourPairTable",
-        ["A_JAN","A_商品名","B_JAN","B_商品名","同時購入回数","同時購入率","A購入者のうち割合","基準比"], topN);
-    }
-
-    // ===== 取込（JOIN & 初期描画） =====
-    runBtn.addEventListener("click", async ()=>{
-      runBtn.disabled = true; statusEl.className = "muted"; statusEl.textContent = "取り込み中…";
       try{
-        const [txRows, lnRows] = await Promise.all([parseCSVFile(txInput.files[0]), parseCSVFile(lnInput.files[0])]);
-        let pmRows = []; if (pmInput.files.length===1) pmRows = await parseCSVFile(pmInput.files[0]);
+        const [txRows, lnRows] = await Promise.all([
+          parseCSVFile(txInput.files[0]),
+          parseCSVFile(lnInput.files[0])
+        ]);
+        let pmRows = [];
+        if (pmInput.files.length===1) pmRows = await parseCSVFile(pmInput.files[0]);
 
+        // 必須列
         const needTx = new Set(["CGID","オーダーID","生成時間"]);
         const needLn = new Set(["CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"]);
         const hasAll=(rows,need)=> rows.length && [...need].every(c=> Object.prototype.hasOwnProperty.call(rows[0],c));
         if(!hasAll(txRows,needTx) || !hasAll(lnRows,needLn)){
-          statusEl.className="error"; statusEl.textContent="必須列が不足しています（CGID, オーダーID, 生成時間 / JANコード, 商品名, 商品数, 商品価格）"; return;
+          statusEl.className="error";
+          statusEl.textContent="必須列が不足（取引毎: CGID, オーダーID, 生成時間 / 商品毎: CGID, オーダーID, JANコード, 商品名, 商品数, 商品価格, 生成時間）";
+          return;
         }
 
-        txRows.forEach(r=>{ r.CGID=String(r.CGID??"").trim(); r.オーダーID=String(r.オーダーID??"").trim();
-          r.生成時間=parseDate(r.生成時間); r.オーダー金額=r.オーダー金額!=null? toNumber(r.オーダー金額,null):null; });
-        lnRows.forEach(r=>{ r.CGID=String(r.CGID??"").trim(); r.オーダーID=String(r.オーダーID??"").trim();
-          r.JANコード=String(r.JANコード??"").trim(); r.商品名=String(r.商品名??"").trim();
-          r.生成時間=parseDate(r.生成時間); r.商品数=Math.trunc(toNumber(r.商品数,0)); r.商品価格=toNumber(r.商品価格,0); });
+        // 整形
+        txRows.forEach(r=>{
+          r.CGID = String(r.CGID ?? "").trim();
+          r.オーダーID = String(r.オーダーID ?? "").trim();
+          r.生成時間 = parseDate(r.生成時間);
+        });
+        lnRows.forEach(r=>{
+          r.CGID = String(r.CGID ?? "").trim();
+          r.オーダーID = String(r.オーダーID ?? "").trim();
+          r.JANコード = String(r.JANコード ?? "").trim();
+          r.商品名 = String(r.商品名 ?? "").trim();
+          r.生成時間 = parseDate(r.生成時間);
+          r.商品数 = Math.trunc(toNumber(r.商品数, 0));
+          r.商品価格 = toNumber(r.商品価格, 0);
+        });
 
-        // マスタ（任意）— 次ステップで拡張（商品名/分類/原価など）
-        let pmMap=null;
-        if(pmRows.length){
-          pmMap=new Map();
+        // 商品マスタ（任意）
+        masterMap = null;
+        if (pmRows.length){
+          masterMap = new Map();
           pmRows.forEach(r=>{
-            const jan=String((r["商品コード"]??"")||(r["JAN"]??"")||(r["JANコード"]??"")).trim(); if(!jan) return;
-            pmMap.set(jan,{商品名:String(r["商品名"]??"").trim(), 商品分類:String(r["商品分類"]??"").trim()});
+            const jan = String(r["JAN"] ?? r["JANコード"] ?? "").trim();
+            if(!jan) return;
+            masterMap.set(jan, {
+              商品名: String(r["商品名"] ?? "").trim(),
+              原価: toNumber(r["原価"], 0),
+              小分類コード: String(r["カテゴリー：小分類コード"] ?? "").trim(),
+              小分類名: String(r["カテゴリー：小分類名"] ?? "").trim()
+            });
           });
         }
 
-        // JOIN（CGID,オーダーID）
-        const txMap=new Map(); txRows.forEach(r=> txMap.set(`${r.CGID}||${r.オーダーID}`, r));
-        joined=[];
+        // JOIN（キー：CGID + オーダーID）…取引毎の生成時間を優先採用
+        const txMap = new Map();
+        txRows.forEach(r => txMap.set(`${r.CGID}||${r.オーダーID}`, r));
+
+        joined = [];
         for(const r of lnRows){
-          const key=`${r.CGID}||${r.オーダーID}`; if(!txMap.has(key)) continue;
-          const tx=txMap.get(key); const 明細金額=(r.商品価格||0)*(r.商品数||0);
-          let 商品名2=r.商品名, 商品分類="";
-          if(pmMap && pmMap.has(r.JANコード)){ const m=pmMap.get(r.JANコード); 商品名2=m.商品名||商品名2; 商品分類=m.商品分類||""; }
-          joined.push({ CGID:r.CGID, オーダーID:r.オーダーID, 生成時間:tx.生成時間||r.生成時間, JANコード:r.JANコード,
-            商品名:商品名2, 商品分類, 商品数:r.商品数, 商品価格:r.商品価格, 明細金額 });
+          const key = `${r.CGID}||${r.オーダーID}`;
+          if(!txMap.has(key)) continue;
+          const tx = txMap.get(key);
+
+          // マスタ適用
+          let 商品名2 = r.商品名;
+          let 小分類コード = "", 小分類名 = "", 原価 = 0;
+          if (masterMap && masterMap.has(r.JANコード)){
+            const m = masterMap.get(r.JANコード);
+            if (m.商品名) 商品名2 = m.商品名;
+            小分類コード = m.小分類コード || "";
+            小分類名   = m.小分類名   || "";
+            原価       = toNumber(m.原価, 0);
+          }
+
+          const 明細金額 = (r.商品価格 || 0) * (r.商品数 || 0);
+          const 明細粗利 = ((r.商品価格 || 0) - (原価 || 0)) * (r.商品数 || 0);
+
+          joined.push({
+            CGID: r.CGID,
+            オーダーID: r.オーダーID,
+            生成時間: tx.生成時間 || r.生成時間,
+            JANコード: r.JANコード,
+            商品名: 商品名2,
+            小分類コード, 小分類名,
+            商品数: r.商品数,
+            商品価格: r.商品価格,
+            原価,
+            明細金額,
+            明細粗利
+          });
         }
 
-        // プレビュー（先頭50）
-        renderTable(joined,"preview",
-          ["CGID","オーダーID","生成時間","JANコード","商品名","商品分類","商品数","商品価格","明細金額"],50);
+        // サマリーKPI
+        const uniqUsers = new Set(joined.map(x=>x.CGID)).size;
+        const receipts  = new Set(joined.map(x=>x.オーダーID)).size;
+        const totalQty  = joined.reduce((s,x)=> s + (x.商品数||0), 0);
+        const totalAmt  = joined.reduce((s,x)=> s + (x.明細金額||0), 0);
+        const totalGp   = joined.reduce((s,x)=> s + (x.明細粗利||0), 0);
+        const dMin = minDate(joined), dMax = maxDate(joined);
 
-        // サマリー
         $("summary").innerHTML = `
-          <div class="metric">顧客数: <b>${new Set(joined.map(r=>r.CGID)).size.toLocaleString()}</b></div>
-          <div class="metric">レシート件数: <b>${new Set(joined.map(r=>r.オーダーID)).size.toLocaleString()}</b></div>
-          <div class="metric">期間: <b>${fmtDate(minDate(joined))} – ${fmtDate(maxDate(joined))}</b></div>
-          <div class="metric">購入単品数合計: <b>${joined.reduce((s,r)=>s+(r.商品数||0),0).toLocaleString()}</b></div>
+          <div class="metric">期間: <span class="kpi-strong">${fmtDate(dMin)} ~ ${fmtDate(dMax)}</span></div>
+          <div class="metric">ユニークユーザー数: <span class="kpi-strong">${uniqUsers.toLocaleString()}</span></div>
+          <div class="metric">レシート件数: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
+          <div class="metric">売上点数合計: <span class="kpi-strong">${totalQty.toLocaleString()}</span></div>
+          <div class="metric">売上金額合計: <span class="kpi-strong">${totalAmt.toLocaleString()}</span></div>
+          <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
         `;
 
-        // RFM
-        rfm = segmentize( computeRFM(joined, Number($("binCount").value)) );
-        renderRFM(Number($("topN").value));
+        // プレビュー（先頭50）
+        renderTable(
+          joined,
+          "preview",
+          ["CGID","オーダーID","生成時間","JANコード","商品名","小分類コード","小分類名","商品数","商品価格","原価","明細金額","明細粗利"],
+          50
+        );
 
-        // セグメント選択肢 / 時間帯選択肢
-        buildSegOptions();
-        buildHourOptions();
+        statusEl.className = "muted";
+        statusEl.textContent = "完了！";
+      }catch(err){
+        console.error(err);
+        statusEl.className = "error";
+        statusEl.textContent = "エラー: " + (err?.message || String(err));
+      }finally{
+        runBtn.disabled = false;
+      }
+    }
 
-        statusEl.className="muted"; statusEl.textContent="完了！";
-      }catch(err){ console.error(err); statusEl.className="error"; statusEl.textContent="エラー: "+(err?.message||String(err)); }
-      finally{ runBtn.disabled=false; }
-    });
-
-    // ===== 画面イベント =====
-    $("recalcBtn").addEventListener("click", ()=>{
-      if(!joined.length){ alert("先にCSVを取り込んでください。"); return; }
-      rfm = segmentize( computeRFM(joined, Number($("binCount").value)) );
-      renderRFM(Number($("topN").value));
-      buildSegOptions();
-    });
-
-    // ランキング（セグメント）
-    $("runRank").addEventListener("click", runRanking);
-
-    // 併売（セグメント）
-    $("runPairs").addEventListener("click", runCooccurrence);
-
-    // 商品ランキング
-    $("runRepeat").addEventListener("click", runRepeatRanking);
-    $("runPopular").addEventListener("click", runPopularRanking);
-
-    // 時間帯分析
-    $("runHourRank").addEventListener("click", runHourlyProductRanking);
-    $("runHourPairs").addEventListener("click", runHourlyPairs);
-
-    // タブ切替
-    document.querySelectorAll(".tab").forEach(t=>{
-      t.addEventListener("click", ()=>{
-        document.querySelectorAll(".tab,.tabcontent").forEach(x=>x.classList.remove("active"));
-        t.classList.add("active"); $(t.dataset.tab).classList.add("active");
-      });
-    });
-
-    // セグメント定義モーダル
-    $("openDef").addEventListener("click", ()=> $("defModal").classList.add("show"));
-    $("closeDef").addEventListener("click", ()=> $("defModal").classList.remove("show"));
+    // イベント
+    $("runBtn").addEventListener("click", runImport);
+    function onTabClick(t){
+      document.querySelectorAll(".tab,.tabcontent").forEach(x=>x.classList.remove("active"));
+      t.classList.add("active");
+      $(t.dataset.tab).classList.add("active");
+    }
+    document.querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=> onTabClick(t)));
 
     // 初期
     (function init(){
-      statusEl.textContent = "CSVを2つ選択してください";
-      buildHourOptions();
+      updateButton();
     })();
   </script>
 </body>
