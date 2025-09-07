@@ -36,7 +36,7 @@
     .fileline { display:flex; align-items:center; gap:8px; }
     .form-row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:12px; }
     .form-row > div { display:flex; flex-direction:column; gap:6px; }
-    select, input[type="date"] { padding:8px 10px; border:1px solid var(--border); border-radius:8px; min-width:180px; }
+    select, input[type="date"] { padding:8px 10px; border:1px solid var(--border); border-radius:8px; min-width:160px; }
   </style>
 </head>
 <body>
@@ -63,7 +63,7 @@
         <span id="fnamePm" class="fname muted">未選択</span>
       </div>
 
-      <span id="status" class="muted" style="margin-left:auto;"></span>
+      <span id="status" class="muted" style="margin-left:auto;">CSVを2つ選択してください</span>
     </div>
 
     <!-- 実体の file input -->
@@ -72,12 +72,12 @@
     <input id="pmFile" type="file" accept=".csv" />
 
     <div class="btn-group" style="margin-top:8px;">
-      <button id="runBtn" class="btn" disabled>集計を実行する</button>
-      <span id="catStatus" class="muted">カテゴリマスタ：取得済み</span>
+      <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
+      <span id="catStatus" class="muted">カテゴリマスタ：起動時にGitHubから自動読込</span>
     </div>
 
     <p class="muted" style="margin-top:8px;">
-      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code>（※ExcelのM列）
+      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code>（ExcelのM列）
     </p>
   </div>
 
@@ -136,8 +136,49 @@
     </div>
   </div>
 
-  <!-- 他タブはプレースホルダ -->
-  <div id="timeTab" class="tabcontent"><div class="card"><p class="muted">時間帯集計は後続で実装します。</p></div></div>
+  <!-- 時間帯集計（今回実装） -->
+  <div id="timeTab" class="tabcontent">
+    <div class="card">
+      <h2>時間帯集計（1時間ごと）</h2>
+      <div class="form-row">
+        <div>
+          <label>開始日</label>
+          <input type="date" id="timeStart" />
+        </div>
+        <div>
+          <label>終了日</label>
+          <input type="date" id="timeEnd" />
+        </div>
+        <div>
+          <label>曜日</label>
+          <select id="timeDow">
+            <option value="all">すべて</option>
+            <option value="weekday">平日</option>
+            <option value="weekend">土日</option>
+          </select>
+        </div>
+        <div>
+          <label>指標</label>
+          <select id="timeMetric">
+            <option value="amt">売上金額（合計）</option>
+            <option value="receipts">レシート件数</option>
+            <option value="basket">バスケットサイズ（点数/レシート）</option>
+            <option value="aov">平均客単価（売上/レシート）</option>
+          </select>
+        </div>
+        <div class="btn-group">
+          <button id="timeRun" class="btn">この条件で集計</button>
+          <button id="timeExport" class="btn ghost" disabled>CSVエクスポート</button>
+          <button id="timePng" class="btn ghost" disabled>PNG保存</button>
+        </div>
+      </div>
+      <div id="timeInfo" class="muted" style="margin-bottom:8px;"></div>
+      <div id="timeChart" style="height:360px;"></div>
+      <div id="timeTable" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <!-- 以降はプレースホルダ -->
   <div id="prodTab" class="tabcontent"><div class="card"><p class="muted">単品分析は後続で実装します。</p></div></div>
   <div id="rfmTab" class="tabcontent"><div class="card"><p class="muted">RFM分析は後続で実装します。</p></div></div>
   <div id="segTab" class="tabcontent"><div class="card"><p class="muted">セグメント分析は後続で実装します。</p></div></div>
@@ -151,7 +192,6 @@
     // ===== ユーティリティ =====
     const $ = (id) => document.getElementById(id);
 
-    // 全角→半角 / トリム
     function toNarrow(str){
       if (str == null) return "";
       return String(str)
@@ -160,21 +200,18 @@
         .replace(/[\uFF01-\uFF5E]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
         .trim();
     }
-    // 比較用のノーマライズ（小文字化＋スペース除去）
-    function keyNorm(s){
-      return toNarrow(s).toLowerCase().replace(/\s+/g,"");
-    }
+    function keyNorm(s){ return toNarrow(s).toLowerCase().replace(/\s+/g,""); }
 
     function parseCSVFile(file){
       return new Promise((resolve,reject)=>{
         Papa.parse(file, {
           header:true, skipEmptyLines:true, encoding:"UTF-8",
           complete: (res)=>{
-            const headers = res.meta.fields.map(h=>toNarrow(h)); // 表示キーは「半角＆トリム」のヘッダ
+            const headers = res.meta.fields.map(h=>toNarrow(h));
             const data = res.data.map(row=>{
               const o={};
               res.meta.fields.forEach((raw,i)=>{
-                const normalized = headers[i]; // ノーマライズ済みの見出しで格納
+                const normalized = headers[i];
                 o[normalized] = row[raw];
               });
               return o;
@@ -185,11 +222,9 @@
       });
     }
 
-    // 通貨・単価文字列に強い数値化
     function toNumber(x, def=0){
       if (x === null || x === undefined) return def;
       let s = String(x);
-      // 全角→半角・不要文字除去
       s = toNarrow(s).replace(/[^\d.\-]/g, "");
       if (!s) return def;
       const v = Number(s);
@@ -227,12 +262,16 @@
     // ===== 状態 =====
     let els = {};
     let joined = [];
-    let masterMap = null;   // JAN -> {商品名, 商品分類(小分類コード), POS原価}
-    let categoryMap = null; // 小分類コード -> 小分類名
+    let masterMap = null;
+    let categoryMap = null;
 
-    // ベスレポの保持（エクスポート用）
+    // ベスレポ保持
     let lastBestList = null;
-    let lastBestMeta = null; // {start,end,label}
+    let lastBestMeta = null;
+
+    // 時間帯集計保持
+    let lastTimeRows = null;
+    let lastTimeMeta = null;
 
     // ===== カテゴリマスタ自動読込 =====
     async function autoLoadCategory(){
@@ -265,7 +304,6 @@
       return map;
     }
 
-    // === ヘッダ探索（候補名 or 位置で決定） ===
     function findHeader(headers, candidates){
       const normHeaders = headers.map(h=>keyNorm(h));
       for (const cand of candidates){
@@ -289,25 +327,21 @@
       const catHdr  = findHeader(headers, catCands);
       const nameHdr = findHeader(headers, nameCands);
       let   costHdr = findHeader(headers, costCands);
-
       if (!costHdr && headers.length > 12) costHdr = headers[12]; // M列
 
       for (const r of pmRows){
         const code = toNarrow(codeHdr ? r[codeHdr] : "").trim();
         if (!code) continue;
-
         const nm   = toNarrow(nameHdr ? r[nameHdr] : "") || "";
         const cat  = toNarrow(catHdr ? r[catHdr] : "") || "";
-
         let cost = 0;
         if (costHdr && r.hasOwnProperty(costHdr)) cost = toNumber(r[costHdr], 0);
-
         map.set(code, { 商品名: nm, 商品分類: cat, POS原価: cost });
       }
       return map;
     }
 
-    // ===== 取り込み & JOIN & サマリー =====
+    // ===== 取り込み & サマリー =====
     async function runImport(){
       const statusEl = els.status; const runBtn = els.runBtn;
       if (runBtn) runBtn.disabled = true;
@@ -419,12 +453,17 @@
           <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
         `;
 
-        // ベスレポの日付UIを初期化
+        // ベスレポ日付
         if (dMin && dMax){
           $("bestStart").min = $("bestEnd").min = fmtDate(dMin);
           $("bestStart").max = $("bestEnd").max = fmtDate(dMax);
           $("bestStart").value = fmtDate(dMin);
           $("bestEnd").value   = fmtDate(dMax);
+
+          $("timeStart").min = $("timeEnd").min = fmtDate(dMin);
+          $("timeStart").max = $("timeEnd").max = fmtDate(dMax);
+          $("timeStart").value = fmtDate(dMin);
+          $("timeEnd").value   = fmtDate(dMax);
         }
 
         const diag = $("masterDiag");
@@ -453,7 +492,7 @@
       }
     }
 
-    // ===== ベスレポ集計 =====
+    // ===== ベスレポ（既存） =====
     function computeBestReport(){
       if (!joined.length){
         $("bestInfo").textContent = "先にCSVを取り込んでください。";
@@ -481,14 +520,9 @@
         const k = r.JANコード || "-";
         if (!byJan.has(k)){
           byJan.set(k, {
-            JANコード: k,
-            商品名: r.商品名 || "",
-            小分類名: r.小分類名 || "",
-            売上金額合計: 0,
-            売上点数合計: 0,
-            粗利合計: 0,
-            ユーザーset: new Set(),
-            userCnt: new Map(),
+            JANコード: k, 商品名: r.商品名 || "", 小分類名: r.小分類名 || "",
+            売上金額合計: 0, 売上点数合計: 0, 粗利合計: 0,
+            ユーザーset: new Set(), userCnt: new Map(),
           });
         }
         const o = byJan.get(k);
@@ -505,9 +539,7 @@
       for (const o of byJan.values()){
         const repeatUsers = Array.from(o.userCnt.values()).filter(cnt => cnt >= 2).length;
         list.push({
-          JANコード: o.JANコード,
-          商品名: o.商品名,
-          小分類名: o.小分類名,
+          JANコード: o.JANコード, 商品名: o.商品名, 小分類名: o.小分類名,
           売上金額合計: Math.round(o.売上金額合計),
           売上点数合計: Math.round(o.売上点数合計),
           粗利合計: Math.round(o.粗利合計),
@@ -516,56 +548,33 @@
         });
       }
 
-      const keyMap = {
-        amt: "売上金額合計",
-        qty: "売上点数合計",
-        gp:  "粗利合計",
-        uniq:"購買ユニークユーザー数",
-        repeat:"リピートユーザー数",
-      };
-      const metricLabelMap = {
-        amt:"売上ベスレポ",
-        qty:"点数ベスレポ",
-        gp:"粗利ベスレポ",
-        uniq:"ユニークユーザー数ベスレポ",
-        repeat:"リピートベスレポ"
-      };
+      const keyMap = { amt:"売上金額合計", qty:"売上点数合計", gp:"粗利合計", uniq:"購買ユニークユーザー数", repeat:"リピートユーザー数" };
+      const metricLabelMap = { amt:"売上ベスレポ", qty:"点数ベスレポ", gp:"粗利ベスレポ", uniq:"ユニークユーザー数ベスレポ", repeat:"リピートベスレポ" };
       const sortKey = keyMap[metric] || "売上金額合計";
       const label  = metricLabelMap[metric] || "売上ベスレポ";
       list.sort((a,b)=> b[sortKey] - a[sortKey]);
 
-      $("bestInfo").textContent = `期間: ${s || "-"} ~ ${e || "-"} / 件数: ${list.length.toLocaleString()} / 並び順: ${$("bestMetric").selectedOptions[0].textContent}`;
-      renderTable(
-        list,
-        "bestTable",
-        ["JANコード","商品名","小分類名","売上金額合計","売上点数合計","粗利合計","購買ユニークユーザー数","リピートユーザー数"],
-        null
-      );
+      $("bestInfo").textContent = `期間: ${s || "-"} ~ ${e || "-"} / 件数: ${list.length.toLocaleString()}`;
+      renderTable(list, "bestTable",
+        ["JANコード","商品名","小分類名","売上金額合計","売上点数合計","粗利合計","購買ユニークユーザー数","リピートユーザー数"], null);
 
-      // エクスポート用に保持
       lastBestList = list;
       lastBestMeta = { start: s || "", end: e || "", label };
       $("bestExport").disabled = !lastBestList || lastBestList.length===0;
     }
 
-    // ===== ベスレポ CSVエクスポート =====
     function exportBestCSV(){
       if (!lastBestList || !lastBestList.length) return;
       const headers = ["JANコード","商品名","小分類名","売上金額合計","売上点数合計","粗利合計","購買ユニークユーザー数","リピートユーザー数"];
-
-      // 1行目（ヘッダ）： yyyy/mm/dd ~ yyyy/mm/dd + レポート名
       const ymd = (s)=> s ? s.replaceAll("-", "/") : "-";
       const preface = `${ymd(lastBestMeta.start)} ~ ${ymd(lastBestMeta.end)} ${lastBestMeta.label}`;
 
-      // CSV生成
       const lines = [];
       lines.push(preface);
       lines.push(headers.join(","));
       for (const r of lastBestList){
         const row = headers.map(h=>{
-          let v = r[h];
-          // CSVエスケープ
-          if (v === null || v === undefined) v = "";
+          let v = r[h]; if (v == null) v = "";
           v = String(v).replaceAll('"','""');
           if (/[",\n]/.test(v)) v = `"${v}"`;
           return v;
@@ -573,20 +582,143 @@
         lines.push(row.join(","));
       }
       const csv = "\uFEFF" + lines.join("\n");
-
-      // ファイル名：YYYY-MM-DD_YYYY-MM-DD_レポート名.csv
       const fn = `${lastBestMeta.start || "all"}_${lastBestMeta.end || "all"}_${lastBestMeta.label}.csv`;
-
-      const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = fn;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"}); const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = fn; document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
+    // ===== 時間帯集計（新規） =====
+    function computeTimeReport(){
+      if (!joined.length){
+        $("timeInfo").textContent = "先にCSVを取り込んでください。";
+        $("timeTable").innerHTML = "";
+        $("timeExport").disabled = true;
+        $("timePng").disabled = true;
+        lastTimeRows = null; lastTimeMeta = null;
+        Plotly.purge("timeChart");
+        return;
+      }
+      const s = $("timeStart").value;
+      const e = $("timeEnd").value;
+      const dow = $("timeDow").value;
+      const metric = $("timeMetric").value;
+
+      const sDate = s ? new Date(s+"T00:00:00") : null;
+      const eDate = e ? new Date(e+"T23:59:59") : null;
+
+      const rows = joined.filter(r=>{
+        if (!r.生成時間) return false;
+        const wd = r.生成時間.getDay(); // 0:Sun
+        const isWeekend = (wd===0 || wd===6);
+        if (dow==="weekday" && isWeekend) return false;
+        if (dow==="weekend" && !isWeekend) return false;
+        if (sDate && r.生成時間 < sDate) return false;
+        if (eDate && r.生成時間 > eDate) return false;
+        return true;
+      });
+
+      // hourバケット 0..23
+      const buckets = Array.from({length:24}, (_,h)=>({
+        時間帯: `${String(h).padStart(2,"0")}:00`,
+        売上金額: 0,
+        売上点数: 0,
+        粗利: 0,
+        _receipts: new Set(),
+        _users: new Set(),
+      }));
+
+      for (const r of rows){
+        const h = r.生成時間.getHours();
+        const b = buckets[h];
+        b.売上金額 += (r.明細金額 || 0);
+        b.売上点数 += (r.商品数 || 0);
+        b.粗利    += (r.明細粗利 || 0);
+        if (r.オーダーID) b._receipts.add(r.オーダーID);
+        if (r.CGID) b._users.add(r.CGID);
+      }
+
+      // 派生指標 & 表データ
+      const tableRows = buckets.map(b=>{
+        const rc = b._receipts.size || 0;
+        const basket = rc ? (b.売上点数/rc) : 0;
+        const aov    = rc ? (b.売上金額/rc) : 0;
+        return {
+          時間帯: b.時間帯,
+          売上金額: Math.round(b.売上金額),
+          売上点数: Math.round(b.売上点数),
+          粗利: Math.round(b.粗利),
+          レシート件数: rc,
+          ユニークユーザー数: b._users.size,
+          バスケットサイズ: +basket.toFixed(2),
+          平均客単価: +aov.toFixed(2)
+        };
+      });
+
+      // 折れ線用 Y配列
+      const yKeyMap = { amt:"売上金額", receipts:"レシート件数", basket:"バスケットサイズ", aov:"平均客単価" };
+      const labelMap = { amt:"売上金額", receipts:"レシート件数", basket:"バスケットサイズ", aov:"平均客単価" };
+      const yKey = yKeyMap[metric] || "売上金額";
+      const label = labelMap[metric] || "売上金額";
+
+      const x = buckets.map(b=> b.時間帯);
+      const y = tableRows.map(r=> r[yKey]);
+
+      Plotly.newPlot("timeChart", [{
+        type:"scatter", mode:"lines+markers",
+        x, y, name: label
+      }], {
+        margin:{l:50,r:10,t:10,b:40},
+        xaxis:{title:"時間帯（時）"},
+        yaxis:{title: label, rangemode:"tozero"},
+        displayModeBar:false
+      }, {responsive:true});
+
+      // ランキング（降順）
+      const ranking = [...tableRows].sort((a,b)=> b[yKey] - a[yKey]);
+
+      $("timeInfo").textContent = `期間: ${s || "-"} ~ ${e || "-"} / 曜日: ${({"all":"すべて","weekday":"平日","weekend":"土日"}[dow])} / 指標: ${label}`;
+      renderTable(ranking, "timeTable",
+        ["時間帯","売上金額","売上点数","粗利","レシート件数","ユニークユーザー数","バスケットサイズ","平均客単価"], null);
+
+      // エクスポート用保持
+      lastTimeRows = tableRows; // 時間順の表（ランキングでなく時間順のほうが後続利用に親切）
+      lastTimeMeta = { start:s||"", end:e||"", label:`時間帯集計（${label}）`, dow };
+      $("timeExport").disabled = lastTimeRows.length===0;
+      $("timePng").disabled = false;
+    }
+
+    function exportTimeCSV(){
+      if (!lastTimeRows || !lastTimeRows.length) return;
+      const headers = ["時間帯","売上金額","売上点数","粗利","レシート件数","ユニークユーザー数","バスケットサイズ","平均客単価"];
+      const ymd = (s)=> s ? s.replaceAll("-", "/") : "-";
+      const dowLabel = {"all":"すべて","weekday":"平日","weekend":"土日"}[lastTimeMeta.dow] || "すべて";
+      const preface = `${ymd(lastTimeMeta.start)} ~ ${ymd(lastTimeMeta.end)} ${lastTimeMeta.label}（${dowLabel}）`;
+
+      const lines = [];
+      lines.push(preface);
+      lines.push(headers.join(","));
+      for (const r of lastTimeRows){
+        const row = headers.map(h=>{
+          let v = r[h]; if (v == null) v = "";
+          v = String(v).replaceAll('"','""');
+          if (/[",\n]/.test(v)) v = `"${v}"`;
+          return v;
+        });
+        lines.push(row.join(","));
+      }
+      const csv = "\uFEFF" + lines.join("\n");
+      const fn = `${lastTimeMeta.start || "all"}_${lastTimeMeta.end || "all"}_${lastTimeMeta.label}.csv`;
+      const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"}); const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = fn; document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+
+    async function exportTimePNG(){
+      await Plotly.downloadImage("timeChart", {format:"png", filename:"time_series"});
+    }
+
+    // ===== UI wiring =====
     function updateButton(){
       const ok = (els.txInput?.files?.length===1 && els.lnInput?.files?.length===1);
       if (els.runBtn) els.runBtn.disabled = !ok;
@@ -645,6 +777,12 @@
       $("bestRun")?.addEventListener("click", computeBestReport);
       $("bestExport")?.addEventListener("click", exportBestCSV);
 
+      // 時間帯
+      $("timeRun")?.addEventListener("click", computeTimeReport);
+      $("timeExport")?.addEventListener("click", exportTimeCSV);
+      $("timePng")?.addEventListener("click", exportTimePNG);
+
+      // 初期
       updateButton();
     });
   </script>
