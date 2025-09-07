@@ -39,7 +39,7 @@
     select, input[type="date"], input[type="text"] { padding:8px 10px; border:1px solid var(--border); border-radius:8px; min-width:160px; }
     .badge { display:inline-block; padding:2px 8px; border:1px solid var(--border); border-radius:999px; font-size:12px; background:#fafafa; }
 
-    /* --- RFM モーダル --- */
+    /* --- モーダル --- */
     .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:1000; }
     .modal .dialog { background:#fff; width:min(720px, 92vw); margin:10vh auto; border-radius:12px; padding:16px 18px; border:1px solid var(--border); }
     .modal .close { float:right; cursor:pointer; font-weight:900; font-size:20px; padding:2px 8px; border-radius:8px; }
@@ -49,7 +49,7 @@
     .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
     @media (max-width: 900px){ .grid2 { grid-template-columns: 1fr; } }
 
-    /* --- セグメント分析（レイアウト微調整） --- */
+    /* --- セグメント分析（レイアウト） --- */
     .seg-checks { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
     .seg-checks label { font-weight:500; margin:0; }
     .seg-card { display:grid; grid-template-columns: 1fr; gap:12px; }
@@ -238,7 +238,7 @@
     </div>
   </div>
 
-  <!-- セグメント分析（新規実装） -->
+  <!-- セグメント分析（実装） -->
   <div id="segTab" class="tabcontent">
     <div class="card">
       <h2>セグメント分析</h2>
@@ -282,9 +282,74 @@
     </div>
   </div>
 
-  <!-- 以降プレースホルダ -->
-  <div id="repeatOnlyTab" class="tabcontent"><div class="card"><p class="muted">リピート分析は後続で実装します。</p></div></div>
-  <div id="pairOnlyTab" class="tabcontent"><div class="card"><p class="muted">併売分析は後続で実装します。</p></div></div>
+  <!-- リピート分析（実装） -->
+  <div id="repeatOnlyTab" class="tabcontent">
+    <div class="card">
+      <h2>リピート分析</h2>
+      <div class="form-row">
+        <div><label>開始日</label><input type="date" id="repeatStart" /></div>
+        <div><label>終了日</label><input type="date" id="repeatEnd" /></div>
+        <div>
+          <label>対象セグメント</label>
+          <div class="seg-checks">
+            <label><input type="checkbox" class="repeatChk" value="ヘビーユーザー" checked> ヘビー</label>
+            <label><input type="checkbox" class="repeatChk" value="一般ユーザー" checked> 一般</label>
+            <label><input type="checkbox" class="repeatChk" value="ライトユーザー" checked> ライト</label>
+            <label><input type="checkbox" class="repeatChk" value="離反傾向"> 離反傾向</label>
+            <label><input type="checkbox" class="repeatChk" value="離反顧客"> 離反</label>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button id="repeatRun" class="btn">この条件で集計</button>
+          <button id="repeatExport" class="btn ghost" disabled>CSVエクスポート</button>
+        </div>
+      </div>
+
+      <div id="repeatInfo" class="muted" style="margin-bottom:8px;"></div>
+      <div id="repeatKpi" class="metrics"></div>
+      <div id="repeatTable"></div>
+    </div>
+  </div>
+
+  <!-- 併売分析（実装） -->
+  <div id="pairOnlyTab" class="tabcontent">
+    <div class="card">
+      <h2>併売分析</h2>
+      <div class="form-row">
+        <div><label>開始日</label><input type="date" id="pairStart" /></div>
+        <div><label>終了日</label><input type="date" id="pairEnd" /></div>
+        <div>
+          <label>対象セグメント</label>
+          <div class="seg-checks">
+            <label><input type="checkbox" class="pairChk" value="ヘビーユーザー" checked> ヘビー</label>
+            <label><input type="checkbox" class="pairChk" value="一般ユーザー" checked> 一般</label>
+            <label><input type="checkbox" class="pairChk" value="ライトユーザー" checked> ライト</label>
+            <label><input type="checkbox" class="pairChk" value="離反傾向"> 離反傾向</label>
+            <label><input type="checkbox" class="pairChk" value="離反顧客"> 離反</label>
+          </div>
+        </div>
+        <div>
+          <label>最小同時購買レシート数</label>
+          <input type="text" id="pairMinSupp" value="5" />
+        </div>
+        <div>
+          <label>並び順</label>
+          <select id="pairSortKey">
+            <option value="lift">リフト（優先）</option>
+            <option value="support">同時購買数</option>
+            <option value="conf">信頼度（max）</option>
+          </select>
+        </div>
+        <div class="btn-group">
+          <button id="pairRun" class="btn">この条件で集計</button>
+          <button id="pairExport" class="btn ghost" disabled>CSVエクスポート</button>
+        </div>
+      </div>
+
+      <div id="pairInfo" class="muted" style="margin-bottom:8px;"></div>
+      <div id="pairTable"></div>
+    </div>
+  </div>
 
   <!-- === ポップアップ（モーダル） === -->
   <div id="modalRfm" class="modal"><div class="dialog">
@@ -419,6 +484,12 @@
     let lastSegProd = null;
     let lastSegCat = null;
 
+    // リピート/併売 保持
+    let lastRepeatRows = null;
+    let lastRepeatMeta = null;
+    let lastPairRows = null;
+    let lastPairMeta = null;
+
     // ===== カテゴリマスタ自動読込 =====
     async function autoLoadCategory(){
       const badge = els.catStatus;
@@ -544,10 +615,10 @@
           if(!txMap.has(key)) continue;
           const txRec = txMap.get(key);
 
-        let 商品名2 = r.商品名;
-        let 商品分類 = "";
-        let 小分類名 = "";
-        let 原価 = 0;
+          let 商品名2 = r.商品名;
+          let 商品分類 = "";
+          let 小分類名 = "";
+          let 原価 = 0;
 
           if (masterMap && masterMap.has(r.JANコード)){
             const m = masterMap.get(r.JANコード);
@@ -598,9 +669,9 @@
           <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
         `;
 
-        // 日付UIの初期値
+        // 日付UIの初期値（seg/repeat/pair も含めて設定）
         if (dMin && dMax){
-          ["best","time","prod","rfm","seg"].forEach(prefix=>{
+          ["best","time","prod","rfm","seg","repeat","pair"].forEach(prefix=>{
             $(prefix+"Start").min = $(prefix+"End").min = fmtDate(dMin);
             $(prefix+"Start").max = $(prefix+"End").max = fmtDate(dMax);
             $(prefix+"Start").value = fmtDate(dMin);
@@ -909,7 +980,7 @@
       $("prodDiag").innerHTML = `明細行: ${rows.length.toLocaleString()} / レシート: ${receiptSet.size.toLocaleString()} / 最小日時: ${fmtDateSlash(minDate(rows))} / 最大日時: ${fmtDateSlash(maxDate(rows))}`;
     }
 
-    // ===== RFM（既存）=====
+    // ===== RFM =====
     function quantiles(arr, qs){
       const a = arr.slice().sort((x,y)=>x-y);
       const res = [];
@@ -958,7 +1029,6 @@
       const s=$("rfmStart").value, e=$("rfmEnd").value, taxRateSel=Number($("rfmTax").value||"0");
       const sDate=s?new Date(s+"T00:00:00"):null, eDate=e?new Date(e+"T23:59:59"):null;
 
-      // フィルタ対象明細
       const rows=joined.filter(r=> r.生成時間 && (!sDate||r.生成時間>=sDate) && (!eDate||r.生成時間<=eDate));
       if (!rows.length){
         $("rfmInfo").textContent="該当データがありません。";
@@ -967,7 +1037,6 @@
         lastRfmRows=[]; return;
       }
 
-      // レシート集約（F/R用）
       const receiptMap = new Map(); // key: CGID||オーダーID
       for (const r of rows){
         const key=`${r.CGID}||${r.オーダーID}`;
@@ -977,7 +1046,6 @@
         if (r.生成時間 && (!o.時刻 || r.生成時間>o.時刻)) o.時刻=r.生成時間;
       }
 
-      // 顧客（Mは税抜換算）
       const byUser = new Map();
       const taxDiv = taxRateSel>0 ? (1+taxRateSel/100) : 1;
       for (const r of rows){
@@ -988,7 +1056,6 @@
         u.GM += (r.明細粗利||0);
         if (!u.last || r.生成時間>u.last) u.last=r.生成時間;
       }
-      // F: レシート件数
       for (const rec of receiptMap.values()){
         if (!byUser.has(rec.CGID)) byUser.set(rec.CGID,{CGID:rec.CGID,M:0,GM:0,last:null});
         const u=byUser.get(rec.CGID);
@@ -1009,7 +1076,6 @@
         Plotly.purge("rfmPie"); Plotly.purge("rfmScatter"); lastRfmRows=[]; return;
       }
 
-      // 分位カット（全顧客に対する分位）
       const n=list.length;
       let cutsR, cutsF, cutsM;
       if (n<100){
@@ -1042,14 +1108,12 @@
 
       $("rfmInfo").textContent=`期間: ${s||"-"} ~ ${e||"-"} / 顧客数: ${rowsOut.length.toLocaleString()} / 税率: ${taxRateSel}%`;
 
-      // 円グラフ（セグメント分布）
       const segCount = {};
       for (const r of rowsOut){ segCount[r.セグメント]=(segCount[r.セグメント]||0)+1; }
       const segLabels = Object.keys(segCount);
       const segValues = segLabels.map(k=>segCount[k]);
       Plotly.newPlot("rfmPie", [{ type:"pie", labels:segLabels, values:segValues, hole:0.35 }], { margin:{l:10,r:10,t:20,b:10}, showlegend:true }, {responsive:true});
 
-      // 散布図（R×F、サイズ=M）
       Plotly.newPlot("rfmScatter", [{
         x: rowsOut.map(r=> r["R（日数）"]),
         y: rowsOut.map(r=> r["F（回）"]),
@@ -1082,213 +1146,423 @@
       const a=document.createElement("a"); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
-    // ===== セグメント分析（新規） =====
-    function computeSegmentAnalysis(){
-      if (!joined.length){
-        $("segInfo").textContent="先にCSVを取り込んでください。";
-        $("segKpi").innerHTML=""; $("segProdTable").innerHTML=""; $("segCatTable").innerHTML="";
-        Plotly.purge("segTimeChart"); lastSegMeta=null; lastSegTime=null; lastSegProd=null; lastSegCat=null;
-        $("segExport").disabled = true;
-        return;
-      }
-      const s = $("segStart").value, e = $("segEnd").value;
-      const sDate = s ? new Date(s+"T00:00:00") : null;
-      const eDate = e ? new Date(e+"T23:59:59") : null;
+    // ===== 共通: 指定期間・RFM基準でセグメントを付与し、対象ユーザー集合を返す =====
+    function buildSegmentationMap(startStr, endStr, taxRate=10){
+      const sDate = startStr ? new Date(startStr+"T00:00:00") : null;
+      const eDate = endStr   ? new Date(endStr+"T23:59:59") : null;
+      const rows = joined.filter(r=> r.生成時間 && (!sDate || r.生成時間>=sDate) && (!eDate || r.生成時間<=eDate));
+      if (!rows.length) return { segOf:new Map(), users:new Set(), receipts:new Set(), rows:[] };
 
-      // 期間フィルタ
-      const inPeriod = joined.filter(r=>{
-        if (!r.生成時間) return false;
-        if (sDate && r.生成時間 < sDate) return false;
-        if (eDate && r.生成時間 > eDate) return false;
-        return true;
-      });
-      if (!inPeriod.length){
-        $("segInfo").textContent="該当データがありません。";
-        $("segKpi").innerHTML=""; $("segProdTable").innerHTML=""; $("segCatTable").innerHTML="";
-        Plotly.purge("segTimeChart"); $("segExport").disabled = true;
-        lastSegMeta=null; lastSegTime=null; lastSegProd=null; lastSegCat=null;
-        return;
-      }
-
-      // RFM（期間内）でセグメントを付与（税抜き前提で M=明細金額）
-      // 1) 顧客別 M/last、2) レシート別で F 集計、3) 分位スコア→セグメント名
       const receiptMap = new Map();
-      for (const r of inPeriod){
-        const k = `${r.CGID}||${r.オーダーID}`;
-        if (!receiptMap.has(k)) receiptMap.set(k,{ CGID:r.CGID, ts:r.生成時間 });
-        const o = receiptMap.get(k); if (r.生成時間 && r.生成時間 > o.ts) o.ts = r.生成時間;
+      for (const r of rows){
+        const key = `${r.CGID}||${r.オーダーID}`;
+        if (!receiptMap.has(key)) receiptMap.set(key, {CGID:r.CGID, 時刻:r.生成時間});
+        const o = receiptMap.get(key);
+        if (r.生成時間 && (!o.時刻 || r.生成時間>o.時刻)) o.時刻=r.生成時間;
       }
+
       const byUser = new Map();
-      for (const r of inPeriod){
-        const k=r.CGID||"-"; if (!byUser.has(k)) byUser.set(k,{ CGID:k, M:0, last:null, F:0 });
+      const taxDiv = taxRate>0 ? (1+taxRate/100) : 1;
+      for (const r of rows){
+        const k=r.CGID||"-"; if (!byUser.has(k)) byUser.set(k,{M:0,last:null});
         const u=byUser.get(k);
-        u.M += (r.明細金額 || 0);
-        if (!u.last || r.生成時間 > u.last) u.last = r.生成時間;
+        u.M += (r.明細金額||0)/taxDiv;
+        if (!u.last || r.生成時間>u.last) u.last=r.生成時間;
       }
       for (const rec of receiptMap.values()){
-        const k = rec.CGID || "-";
-        if (!byUser.has(k)) byUser.set(k,{ CGID:k, M:0, last:null, F:0 });
-        byUser.get(k).F += 1;
+        if (!byUser.has(rec.CGID)) byUser.set(rec.CGID,{M:0,last:null});
+        byUser.get(rec.CGID).F = (byUser.get(rec.CGID).F||0)+1;
       }
 
-      const baseDate = eDate || maxDate(inPeriod) || new Date();
-      const users = [];
-      for (const u of byUser.values()){
-        if (!u.last) continue;
-        const R_days = Math.max(0, Math.floor((baseDate - u.last)/(1000*60*60*24)));
-        users.push({ CGID:u.CGID, R_days, F:u.F||0, M:u.M||0, last:u.last });
+      const baseDate = eDate || maxDate(rows) || new Date();
+      const list=[];
+      for (const [cgid,u] of byUser.entries()){
+        if (!u.last){ continue; }
+        const days = Math.max(0, Math.floor((baseDate - u.last)/(1000*60*60*24)));
+        list.push({CGID:cgid, R_days:days, F:u.F||0, M:u.M});
       }
+
       let cutsR, cutsF, cutsM;
-      if (users.length < 100){
-        cutsR = quantiles(users.map(x=>x.R_days), [1/3,2/3]);
-        cutsF = quantiles(users.map(x=>x.F),      [1/3,2/3]);
-        cutsM = quantiles(users.map(x=>x.M),      [1/3,2/3]);
+      if (list.length<100){
+        cutsR = quantiles(list.map(x=>x.R_days), [1/3,2/3]);
+        cutsF = quantiles(list.map(x=>x.F),      [1/3,2/3]);
+        cutsM = quantiles(list.map(x=>x.M),      [1/3,2/3]);
       }else{
-        cutsR = quantiles(users.map(x=>x.R_days), [0.2,0.4,0.6,0.8]);
-        cutsF = quantiles(users.map(x=>x.F),      [0.2,0.4,0.6,0.8]);
-        cutsM = quantiles(users.map(x=>x.M),      [0.2,0.4,0.6,0.8]);
+        cutsR = quantiles(list.map(x=>x.R_days), [0.2,0.4,0.6,0.8]);
+        cutsF = quantiles(list.map(x=>x.F),      [0.2,0.4,0.6,0.8]);
+        cutsM = quantiles(list.map(x=>x.M),      [0.2,0.4,0.6,0.8]);
       }
-      const withSeg = users.map(x=>{
-        const Rs=scoreByQuantile(x.R_days, cutsR, true);
-        const Fs=scoreByQuantile(x.F, cutsF, false);
-        const Ms=scoreByQuantile(x.M, cutsM, false);
-        return { ...x, seg: rfmSegmentName(Rs, Fs, Ms) };
-      });
 
-      // 選択セグメント
-      const selected = Array.from(document.querySelectorAll(".segChk:checked")).map(el=>el.value);
-      const selSet = new Set(selected);
-      const targetUsers = new Set(withSeg.filter(u=> selSet.has(u.seg)).map(u=>u.CGID));
-      const rows = inPeriod.filter(r=> targetUsers.has(r.CGID));
+      const segOf = new Map();
+      for (const x of list){
+        const Rs = scoreByQuantile(x.R_days, cutsR, true);
+        const Fs = scoreByQuantile(x.F,      cutsF, false);
+        const Ms = scoreByQuantile(x.M,      cutsM, false);
+        segOf.set(x.CGID, rfmSegmentName(Rs, Fs, Ms));
+      }
 
-      // KPI
-      const userCnt = targetUsers.size;
-      const receiptSet = new Set(rows.map(r=> r.オーダーID));
-      const receipts = receiptSet.size;
-      const sumQty = rows.reduce((s,x)=> s + (x.商品数||0), 0);
-      const sumAmt = rows.reduce((s,x)=> s + (x.明細金額||0), 0);
+      const users = new Set(rows.map(r=> r.CGID).filter(Boolean));
+      const receipts = new Set(rows.map(r=> r.オーダーID).filter(Boolean));
+      return { segOf, users, receipts, rows };
+    }
 
-      const kpiHtml = `
-        <div class="metric">対象ユーザー数: <span class="kpi-strong">${userCnt.toLocaleString()}</span></div>
-        <div class="metric">レシート数合計: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
-        <div class="metric">レシート/人: <span class="kpi-strong">${(userCnt? (receipts/userCnt):0).toFixed(2)}</span></div>
-        <div class="metric">購買点数合計: <span class="kpi-strong">${Math.round(sumQty).toLocaleString()}</span></div>
-        <div class="metric">点数/人: <span class="kpi-strong">${(userCnt? (sumQty/userCnt):0).toFixed(2)}</span></div>
-        <div class="metric">購買額合計(税抜): <span class="kpi-strong">${Math.round(sumAmt).toLocaleString()}</span></div>
-        <div class="metric">購買額/人(税抜): <span class="kpi-strong">${(userCnt? (sumAmt/userCnt):0).toFixed(2)}</span></div>
+    // ===== セグメント分析 =====
+    function computeSegReport(){
+      if (!joined.length){
+        $("segInfo").textContent="先にCSVを取り込んでください。";
+        $("segKpi").innerHTML=""; $("segCatTable").innerHTML=""; $("segProdTable").innerHTML="";
+        Plotly.purge("segTimeChart");
+        $("segExport").disabled=true; return;
+      }
+      const s = $("segStart").value, e=$("segEnd").value;
+      const checked = Array.from(document.querySelectorAll(".segChk:checked")).map(x=> x.value);
+      if (!checked.length){
+        $("segInfo").textContent="セグメントを1つ以上選択してください。";
+        return;
+      }
+
+      const { segOf, rows } = buildSegmentationMap(s, e, 10);
+      if (!rows.length){
+        $("segInfo").textContent="該当データがありません。";
+        $("segKpi").innerHTML=""; $("segCatTable").innerHTML=""; $("segProdTable").innerHTML="";
+        Plotly.purge("segTimeChart");
+        $("segExport").disabled=true; return;
+      }
+
+      const targetUsers = new Set();
+      for (const [cgid, seg] of segOf.entries()){
+        if (checked.includes(seg)) targetUsers.add(cgid);
+      }
+      const targetRows = rows.filter(r=> targetUsers.has(r.CGID));
+      if (!targetRows.length){
+        $("segInfo").textContent="選択したセグメントに該当する購買がありません。";
+        $("segKpi").innerHTML=""; $("segCatTable").innerHTML=""; $("segProdTable").innerHTML="";
+        Plotly.purge("segTimeChart");
+        $("segExport").disabled=true; return;
+      }
+
+      const uu = new Set(targetRows.map(r=>r.CGID)).size;
+      const rc = new Set(targetRows.map(r=>r.オーダーID)).size;
+      const qty = targetRows.reduce((s,x)=> s+(x.商品数||0), 0);
+      const amt = targetRows.reduce((s,x)=> s+(x.明細金額||0), 0);
+
+      $("segKpi").innerHTML = `
+        <div class="metric">ユニークユーザー数: <span class="kpi-strong">${uu.toLocaleString()}</span></div>
+        <div class="metric">レシート数合計: <span class="kpi-strong">${rc.toLocaleString()}</span></div>
+        <div class="metric">レシート/ユーザー: <span class="kpi-strong">${(uu? (rc/uu):0).toFixed(2)}</span></div>
+        <div class="metric">購買点数合計: <span class="kpi-strong">${Math.round(qty).toLocaleString()}</span></div>
+        <div class="metric">点数/ユーザー: <span class="kpi-strong">${(uu? (qty/uu):0).toFixed(2)}</span></div>
+        <div class="metric">購買額合計: <span class="kpi-strong">${Math.round(amt).toLocaleString()}</span></div>
+        <div class="metric">購買額/ユーザー: <span class="kpi-strong">${(uu? (amt/uu):0).toFixed(2)}</span></div>
       `;
-      $("segKpi").innerHTML = kpiHtml;
+      $("segInfo").textContent = `期間: ${s || "-"} ~ ${e || "-"} / セグメント: ${checked.join(", ")}`;
 
-      // 商品Top100
+      // 商品 Top100
       const byJan = new Map();
-      for (const r of rows){
-        const k = r.JANコード || "-";
-        if (!byJan.has(k)){
-          byJan.set(k, { JANコード:k, 商品名:r.商品名||"", 小分類名:r.小分類名||"", 金額:0, 点数:0, UU:new Set() });
-        }
-        const o = byJan.get(k);
+      for (const r of targetRows){
+        const k=r.JANコード||"-";
+        if (!byJan.has(k)) byJan.set(k,{ JANコード:k, 商品名:r.商品名||"", 小分類名:r.小分類名||"", 金額:0, 点数:0, _users:new Set() });
+        const o=byJan.get(k);
         o.金額 += (r.明細金額||0);
         o.点数 += (r.商品数||0);
-        if (r.CGID) o.UU.add(r.CGID);
+        if (r.CGID) o._users.add(r.CGID);
       }
       const prodList = Array.from(byJan.values()).map(o=>({
         JANコード:o.JANコード, 商品名:o.商品名, 小分類名:o.小分類名,
-        売上金額合計:Math.round(o.金額), 売上点数合計:Math.round(o.点数), ユニークユーザー数:o.UU.size
-      }));
-      prodList.sort((a,b)=> b.売上金額合計 - a.売上金額合計 || b.売上点数合計 - a.売上点数合計);
-      const prodTop100 = prodList.slice(0,100);
-      renderTable(prodTop100, "segProdTable",
-        ["JANコード","商品名","小分類名","売上金額合計","売上点数合計","ユニークユーザー数"], null);
+        売上金額合計: Math.round(o.金額), 売上点数合計: Math.round(o.点数), ユーザー数:o._users.size
+      })).sort((a,b)=> b.売上金額合計 - a.売上金額合計).slice(0,100);
+      renderTable(prodList, "segProdTable", ["JANコード","商品名","小分類名","売上金額合計","売上点数合計","ユーザー数"], null);
 
-      // カテゴリTop20（小分類名優先、無ければ商品分類）
+      // カテゴリ Top20（小分類名ベース）
       const byCat = new Map();
-      for (const r of rows){
-        const key = r.小分類名 || r.商品分類 || "-";
-        if (!byCat.has(key)) byCat.set(key,{ カテゴリ:key, 金額:0, 点数:0, UU:new Set() });
-        const o = byCat.get(key);
+      for (const r of targetRows){
+        const k=r.小分類名 || (r.商品分類 || "-");
+        if (!byCat.has(k)) byCat.set(k,{ カテゴリ:k, 金額:0, 点数:0, _users:new Set() });
+        const o=byCat.get(k);
         o.金額 += (r.明細金額||0);
         o.点数 += (r.商品数||0);
-        if (r.CGID) o.UU.add(r.CGID);
+        if (r.CGID) o._users.add(r.CGID);
       }
       const catList = Array.from(byCat.values()).map(o=>({
-        カテゴリ:o.カテゴリ, 売上金額合計:Math.round(o.金額), 売上点数合計:Math.round(o.点数), ユニークユーザー数:o.UU.size
-      }));
-      catList.sort((a,b)=> b.売上金額合計 - a.売上金額合計 || b.売上点数合計 - a.売上点数合計);
-      const catTop20 = catList.slice(0,20);
-      renderTable(catTop20, "segCatTable", ["カテゴリ","売上金額合計","売上点数合計","ユニークユーザー数"], null);
+        カテゴリ:o.カテゴリ, 売上金額合計: Math.round(o.金額), 売上点数合計: Math.round(o.点数), ユーザー数:o._users.size
+      })).sort((a,b)=> b.売上金額合計 - a.売上金額合計).slice(0,20);
+      renderTable(catList, "segCatTable", ["カテゴリ","売上金額合計","売上点数合計","ユーザー数"], null);
 
-      // 時間帯（0-23）売上線グラフ
+      // 時間帯線グラフ（売上金額）
       const buckets = Array.from({length:24}, (_,h)=>({h, amt:0}));
-      for (const r of rows){
-        const h = r.生成時間.getHours();
+      for (const r of targetRows){
+        const h=r.生成時間.getHours();
         buckets[h].amt += (r.明細金額||0);
       }
       Plotly.newPlot("segTimeChart", [{
         type:"scatter", mode:"lines+markers",
         x: buckets.map(b=> String(b.h).padStart(2,"0")+":00"),
         y: buckets.map(b=> Math.round(b.amt)),
-        name:"売上金額(税抜)"
+        name:"売上金額"
       }], {
         margin:{l:50,r:10,t:10,b:40},
         xaxis:{title:"時間帯（時）"},
-        yaxis:{title:"売上金額(税抜)", rangemode:"tozero"},
+        yaxis:{title:"売上金額", rangemode:"tozero"},
         displayModeBar:false
       }, {responsive:true});
 
-      $("segInfo").textContent = `期間: ${s||"-"} ~ ${e||"-"} / 対象セグメント: ${selected.join(", ")||"（未選択）"} / 明細: ${rows.length.toLocaleString()} 行`;
-
-      // 保存してCSV出力で使う
-      lastSegMeta = { start:s||"", end:e||"", segs:selected };
-      lastSegTime = buckets.map(b=> ({ 時:b.h, 金額:Math.round(b.amt) }));
-      lastSegProd = prodTop100;
-      lastSegCat  = catTop20;
-      $("segExport").disabled = rows.length===0;
+      lastSegMeta = { start:s||"", end:e||"", segs:checked.slice() };
+      lastSegTime = buckets.map(b=>({ 時間帯: String(b.h).padStart(2,"0")+":00", 売上金額: Math.round(b.amt) }));
+      lastSegProd = prodList.slice();
+      lastSegCat  = catList.slice();
+      $("segExport").disabled = false;
     }
-
     function exportSegCSV(){
       if (!lastSegMeta) return;
-      const lines = [];
       const ymd=(s)=> s ? s.replaceAll("-","/") : "-";
-      lines.push(`${ymd(lastSegMeta.start)} ~ ${ymd(lastSegMeta.end)} セグメント分析（${(lastSegMeta.segs||[]).join(" / ")||"未選択"}）`);
+      const head = `${ymd(lastSegMeta.start)} ~ ${ymd(lastSegMeta.end)} セグメント: ${lastSegMeta.segs.join(" / ")}`;
+      // 3シート風にまとめて1CSV（見出し行でブロック分け）
+      const lines = ["\uFEFF"+head];
 
-      // KPIは再計算せず表からは出さない（簡潔な前書きのみ）
+      // KPI は値のみ簡易
+      // 省略（表示のみ）—必要であればここに追加可能
 
-      // 商品 Top100
-      lines.push("商品Top100");
-      let headers=["JANコード","商品名","小分類名","売上金額合計","売上点数合計","ユニークユーザー数"];
-      lines.push(headers.join(","));
-      (lastSegProd||[]).forEach(r=>{
-        const row = headers.map(h=>{let v=r[h]; if(v==null)v=""; v=String(v).replaceAll('"','""'); if(/[",\n]/.test(v)) v=`"${v}"`; return v;});
+      // 時間帯
+      lines.push("時間帯別,");
+      lines.push(["時間帯","売上金額"].join(","));
+      lastSegTime.forEach(r=>{
+        const row=["時間帯","売上金額"].map(h=> r[h]);
         lines.push(row.join(","));
       });
 
-      // 区切り
+      // カテゴリ
       lines.push("");
-
-      // カテゴリ Top20
-      lines.push("カテゴリTop20");
-      headers=["カテゴリ","売上金額合計","売上点数合計","ユニークユーザー数"];
-      lines.push(headers.join(","));
-      (lastSegCat||[]).forEach(r=>{
-        const row = headers.map(h=>{let v=r[h]; if(v==null)v=""; v=String(v).replaceAll('"','""'); if(/[",\n]/.test(v)) v=`"${v}"`; return v;});
+      lines.push("カテゴリTop20,");
+      const catHeaders=["カテゴリ","売上金額合計","売上点数合計","ユーザー数"];
+      lines.push(catHeaders.join(","));
+      lastSegCat.forEach(r=>{
+        const row=catHeaders.map(h=> String(r[h]).replaceAll('"','""'));
         lines.push(row.join(","));
       });
 
+      // 商品
       lines.push("");
-      // 時間帯テーブル
-      lines.push("時間帯,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23");
-      const hours = Array.from({length:24},(_,h)=> h);
-      const amtByH = new Array(24).fill(0);
-      (lastSegTime||[]).forEach(o=>{ amtByH[o.時] = o.金額; });
-      lines.push(["金額"].concat(amtByH.map(v=> Math.round(v))).join(","));
+      lines.push("商品Top100,");
+      const prodHeaders=["JANコード","商品名","小分類名","売上金額合計","売上点数合計","ユーザー数"];
+      lines.push(prodHeaders.join(","));
+      lastSegProd.forEach(r=>{
+        const row=prodHeaders.map(h=>{ let v=String(r[h]??"").replaceAll('"','""'); if (/[",\n]/.test(v)) v=`"${v}"`; return v; });
+        lines.push(row.join(","));
+      });
 
-      const csv = "\uFEFF" + lines.join("\n");
-      const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+      const csv = lines.join("\n");
       const fn = `${lastSegMeta.start||"all"}_${lastSegMeta.end||"all"}_segment.csv`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = fn; document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}); const url=URL.createObjectURL(blob);
+      const a=document.createElement("a"); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+
+    // ===== リピート分析 =====
+    function computeRepeatReport(){
+      if (!joined.length){
+        $("repeatInfo").textContent="先にCSVを取り込んでください。";
+        $("repeatKpi").innerHTML=""; $("repeatTable").innerHTML=""; $("repeatExport").disabled=true;
+        return;
+      }
+      const s=$("repeatStart").value, e=$("repeatEnd").value;
+      const checked = Array.from(document.querySelectorAll(".repeatChk:checked")).map(x=> x.value);
+      if (!checked.length){
+        $("repeatInfo").textContent="セグメントを1つ以上選択してください。";
+        return;
+      }
+
+      const { segOf, rows } = buildSegmentationMap(s, e, 10);
+      const targetUsers = new Set();
+      for (const [cgid, seg] of segOf.entries()){
+        if (checked.includes(seg)) targetUsers.add(cgid);
+      }
+      const targetRows = rows.filter(r=> targetUsers.has(r.CGID));
+      if (!targetRows.length){
+        $("repeatInfo").textContent="選択したセグメントに該当する購買がありません。";
+        $("repeatKpi").innerHTML=""; $("repeatTable").innerHTML=""; $("repeatExport").disabled=true; return;
+      }
+
+      // ユーザー×JAN の購入回数
+      const userJanCnt = new Map(); // key: CGID||JAN -> count
+      const byJan = new Map();      // JAN集計
+      for (const r of targetRows){
+        const k = `${r.CGID}||${r.JANコード}`;
+        userJanCnt.set(k, (userJanCnt.get(k)||0) + (r.商品数||0));
+
+        if (!byJan.has(r.JANコード)){
+          byJan.set(r.JANコード, { JANコード:r.JANコード, 商品名:r.商品名||"", 小分類名:r.小分類名||"", ユーザー: new Map(), 金額:0, 点数:0 });
+        }
+        const o = byJan.get(r.JANコード);
+        o.金額 += (r.明細金額||0);
+        o.点数 += (r.商品数||0);
+        o.ユーザー.set(r.CGID, (o.ユーザー.get(r.CGID)||0) + (r.商品数||0));
+      }
+
+      // リピート定義：同一JANを2回以上購入したユーザー
+      const list=[];
+      for (const o of byJan.values()){
+        let repeatUsers=0;
+        for (const cnt of o.ユーザー.values()){
+          if (cnt>=2) repeatUsers++;
+        }
+        list.push({
+          JANコード:o.JANコード, 商品名:o.商品名, 小分類名:o.小分類名,
+          リピートユーザー数: repeatUsers,
+          売上点数合計: Math.round(o.点数),
+          売上金額合計: Math.round(o.金額)
+        });
+      }
+      list.sort((a,b)=> b.リピートユーザー数 - a.リピートユーザー数 || b.売上金額合計 - a.売上金額合計);
+      const top = list.slice(0,30);
+      renderTable(top, "repeatTable", ["JANコード","商品名","小分類名","リピートユーザー数","売上点数合計","売上金額合計"], null);
+
+      // 1ユーザーあたりの平均リピート回数（>=2のみ/全体の両方を表示）
+      const userRepeatCounts = new Map(); // CGID -> 合計(各JANの max(0, cnt-1))
+      for (const [key,cnt] of userJanCnt.entries()){
+        const [cgid] = key.split("||");
+        if (!userRepeatCounts.has(cgid)) userRepeatCounts.set(cgid,0);
+        if (cnt>=2) userRepeatCounts.set(cgid, userRepeatCounts.get(cgid) + (cnt-1));
+      }
+      const uuAll = new Set(targetRows.map(r=> r.CGID)).size;
+      const usersWithRepeat = Array.from(userRepeatCounts.values()).filter(v=> v>0);
+      const avgAll = uuAll ? (Array.from(userRepeatCounts.values()).reduce((a,b)=>a+b,0) / uuAll) : 0;
+      const avgAmongRepeaters = usersWithRepeat.length ? (usersWithRepeat.reduce((a,b)=>a+b,0) / usersWithRepeat.length) : 0;
+
+      $("repeatKpi").innerHTML = `
+        <div class="metric">ユニークユーザー数: <span class="kpi-strong">${uuAll.toLocaleString()}</span></div>
+        <div class="metric">リピート経験者数: <span class="kpi-strong">${usersWithRepeat.length.toLocaleString()}</span></div>
+        <div class="metric">平均リピート回数（全ユーザー）: <span class="kpi-strong">${avgAll.toFixed(2)}</span></div>
+        <div class="metric">平均リピート回数（リピート者）: <span class="kpi-strong">${avgAmongRepeaters.toFixed(2)}</span></div>
+      `;
+      $("repeatInfo").textContent = `期間: ${s || "-"} ~ ${e || "-"} / セグメント: ${checked.join(", ")}`;
+
+      lastRepeatRows = top;
+      lastRepeatMeta = { start:s||"", end:e||"", segs:checked.slice() };
+      $("repeatExport").disabled = !lastRepeatRows.length;
+    }
+    function exportRepeatCSV(){
+      if (!lastRepeatRows || !lastRepeatRows.length) return;
+      const headers = ["JANコード","商品名","小分類名","リピートユーザー数","売上点数合計","売上金額合計"];
+      const ymd=(s)=> s ? s.replaceAll("-","/") : "-";
+      const preface = `${ymd(lastRepeatMeta.start)} ~ ${ymd(lastRepeatMeta.end)} リピート上位（セグメント: ${lastRepeatMeta.segs.join(" / ")}）`;
+      const lines=[preface, headers.join(",")];
+      for (const r of lastRepeatRows){
+        const row=headers.map(h=>{ let v=r[h]; if (v==null) v=""; v=String(v).replaceAll('"','""'); if (/[",\n]/.test(v)) v=`"${v}"`; return v; });
+        lines.push(row.join(","));
+      }
+      const csv="\uFEFF"+lines.join("\n");
+      const fn = `${lastRepeatMeta.start||"all"}_${lastRepeatMeta.end||"all"}_repeat.csv`;
+      const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}); const url=URL.createObjectURL(blob);
+      const a=document.createElement("a"); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    }
+
+    // ===== 併売分析 =====
+    function computePairReport(){
+      if (!joined.length){
+        $("pairInfo").textContent="先にCSVを取り込んでください。";
+        $("pairTable").innerHTML=""; $("pairExport").disabled=true; return;
+      }
+      const s=$("pairStart").value, e=$("pairEnd").value;
+      const checked = Array.from(document.querySelectorAll(".pairChk:checked")).map(x=> x.value);
+      if (!checked.length){
+        $("pairInfo").textContent="セグメントを1つ以上選択してください。";
+        return;
+      }
+      const minSupp = Math.max(1, Math.trunc(toNumber($("pairMinSupp").value||"5",5)));
+      const sortKey = $("pairSortKey").value;
+
+      const { segOf, rows } = buildSegmentationMap(s, e, 10);
+      const targetUsers = new Set();
+      for (const [cgid, seg] of segOf.entries()){
+        if (checked.includes(seg)) targetUsers.add(cgid);
+      }
+      const targetRows = rows.filter(r=> targetUsers.has(r.CGID));
+      if (!targetRows.length){
+        $("pairInfo").textContent="選択したセグメントに該当する購買がありません。";
+        $("pairTable").innerHTML=""; $("pairExport").disabled=true; return;
+      }
+
+      // レシート -> ユニークJAN集合
+      const recToSet = new Map();
+      for (const r of targetRows){
+        const key=r.オーダーID;
+        if (!recToSet.has(key)) recToSet.set(key, new Set());
+        recToSet.get(key).add(r.JANコード);
+      }
+      const recCount = recToSet.size;
+
+      // 単品出現回数
+      const itemCount = new Map(); // JAN -> 出現レシート数
+      recToSet.forEach(set=>{
+        for (const jan of set){
+          itemCount.set(jan, (itemCount.get(jan)||0)+1);
+        }
+      });
+
+      // ペア出現回数（同一レシート内の組合せ）
+      const pairCount = new Map(); // "A||B" (A<B) -> 出現レシート数
+      recToSet.forEach(set=>{
+        const arr = Array.from(set).sort();
+        for (let i=0;i<arr.length;i++){
+          for (let j=i+1;j<arr.length;j++){
+            const a=arr[i], b=arr[j];
+            const key=`${a}||${b}`;
+            pairCount.set(key, (pairCount.get(key)||0)+1);
+          }
+        }
+      });
+
+      // 指標計算
+      const rowsOut=[];
+      for (const [key, supp] of pairCount.entries()){
+        if (supp < minSupp) continue;
+        const [a,b] = key.split("||");
+        const cntA = itemCount.get(a)||1;
+        const cntB = itemCount.get(b)||1;
+        const confAB = supp / cntA;
+        const confBA = supp / cntB;
+        const lift = (supp * recCount) / (cntA * cntB);
+        const aName = masterMap?.get(a)?.商品名 || (joined.find(r=> r.JANコード===a)?.商品名) || "";
+        const bName = masterMap?.get(b)?.商品名 || (joined.find(r=> r.JANコード===b)?.商品名) || "";
+        rowsOut.push({
+          商品A_JAN:a, 商品A名:aName,
+          商品B_JAN:b, 商品B名:bName,
+          同時購買レシート数: supp,
+          リフト: +lift.toFixed(3),
+          信頼度AtoB: +confAB.toFixed(3),
+          信頼度BtoA: +confBA.toFixed(3)
+        });
+      }
+
+      // 並び順
+      if (sortKey==="support"){
+        rowsOut.sort((x,y)=> y.同時購買レシート数 - x.同時購買レシート数 || y.リフト - x.リフト);
+      }else if (sortKey==="conf"){
+        rowsOut.sort((x,y)=> Math.max(y.信頼度AtoB,y.信頼度BtoA) - Math.max(x.信頼度AtoB,x.信頼度BtoA) || y.同時購買レシート数 - x.同時購買レシート数);
+      }else{ // lift
+        rowsOut.sort((x,y)=> y.リフト - x.リフト || y.同時購買レシート数 - x.同時購買レシート数);
+      }
+
+      $("pairInfo").textContent = `期間: ${s || "-"} ~ ${e || "-"} / セグメント: ${checked.join(", ")} / レシート: ${recCount.toLocaleString()} / 最小同時購買数: ${minSupp}`;
+      renderTable(rowsOut, "pairTable", ["商品A_JAN","商品A名","商品B_JAN","商品B名","同時購買レシート数","リフト","信頼度AtoB","信頼度BtoA"], null);
+
+      lastPairRows = rowsOut;
+      lastPairMeta = { start:s||"", end:e||"", segs:checked.slice(), minSupp, sortKey, recCount };
+      $("pairExport").disabled = rowsOut.length===0;
+    }
+    function exportPairCSV(){
+      if (!lastPairRows || !lastPairRows.length) return;
+      const headers = ["商品A_JAN","商品A名","商品B_JAN","商品B名","同時購買レシート数","リフト","信頼度AtoB","信頼度BtoA"];
+      const ymd=(s)=> s ? s.replaceAll("-","/") : "-";
+      const preface = `${ymd(lastPairMeta.start)} ~ ${ymd(lastPairMeta.end)} 併売（セグメント: ${lastPairMeta.segs.join(" / ")} / minSupp=${lastPairMeta.minSupp} / sort=${lastPairMeta.sortKey})`;
+      const lines=[preface, headers.join(",")];
+      for (const r of lastPairRows){
+        const row=headers.map(h=>{ let v=r[h]; if (v==null) v=""; v=String(v).replaceAll('"','""'); if (/[",\n]/.test(v)) v=`"${v}"`; return v; });
+        lines.push(row.join(","));
+      }
+      const csv="\uFEFF"+lines.join("\n");
+      const fn = `${lastPairMeta.start||"all"}_${lastPairMeta.end||"all"}_pair.csv`;
+      const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"}); const url=URL.createObjectURL(blob);
+      const a=document.createElement("a"); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
     // ===== UI配線 =====
@@ -1336,7 +1610,7 @@
         catStatus: $("catStatus"),
       };
 
-      // ファイルピッカー（PC想定）
+      // ファイルピッカー
       els.pickTx?.addEventListener("click", ()=> els.txInput?.click());
       els.pickLn?.addEventListener("click", ()=> els.lnInput?.click());
       els.pickPm?.addEventListener("click", ()=> els.pmInput?.click());
@@ -1370,9 +1644,17 @@
       $("rfmRun")?.addEventListener("click", computeRFM);
       $("rfmExport")?.addEventListener("click", exportRFM);
 
-      // セグメント分析
-      $("segRun")?.addEventListener("click", computeSegmentAnalysis);
+      // セグメント
+      $("segRun")?.addEventListener("click", computeSegReport);
       $("segExport")?.addEventListener("click", exportSegCSV);
+
+      // リピート
+      $("repeatRun")?.addEventListener("click", computeRepeatReport);
+      $("repeatExport")?.addEventListener("click", exportRepeatCSV);
+
+      // 併売
+      $("pairRun")?.addEventListener("click", computePairReport);
+      $("pairExport")?.addEventListener("click", exportPairCSV);
 
       // 初期UI
       updateButton();
