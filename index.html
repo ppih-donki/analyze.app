@@ -48,6 +48,12 @@
     .hstack { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
     @media (max-width: 900px){ .grid2 { grid-template-columns: 1fr; } }
+
+    /* --- セグメント分析（レイアウト微調整） --- */
+    .seg-checks { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .seg-checks label { font-weight:500; margin:0; }
+    .seg-card { display:grid; grid-template-columns: 1fr; gap:12px; }
+    @media (min-width: 1000px){ .seg-card { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
 <body>
@@ -194,7 +200,7 @@
     </div>
   </div>
 
-  <!-- RFM分析（新規実装） -->
+  <!-- RFM分析 -->
   <div id="rfmTab" class="tabcontent">
     <div class="card">
       <div class="hstack">
@@ -232,8 +238,51 @@
     </div>
   </div>
 
-  <!-- 以降プレースホルダ（未実装タブ） -->
-  <div id="segTab" class="tabcontent"><div class="card"><p class="muted">セグメント分析は後続で実装します。</p></div></div>
+  <!-- セグメント分析（新規実装） -->
+  <div id="segTab" class="tabcontent">
+    <div class="card">
+      <h2>セグメント分析</h2>
+      <div class="form-row">
+        <div><label>開始日</label><input type="date" id="segStart" /></div>
+        <div><label>終了日</label><input type="date" id="segEnd" /></div>
+        <div>
+          <label>対象セグメント</label>
+          <div class="seg-checks">
+            <label><input type="checkbox" class="segChk" value="ヘビーユーザー" checked> ヘビー</label>
+            <label><input type="checkbox" class="segChk" value="一般ユーザー" checked> 一般</label>
+            <label><input type="checkbox" class="segChk" value="ライトユーザー" checked> ライト</label>
+            <label><input type="checkbox" class="segChk" value="離反傾向"> 離反傾向</label>
+            <label><input type="checkbox" class="segChk" value="離反顧客"> 離反</label>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button id="segRun" class="btn">この条件で集計</button>
+          <button id="segExport" class="btn ghost" disabled>CSVエクスポート</button>
+        </div>
+      </div>
+
+      <div id="segInfo" class="muted" style="margin-bottom:8px;"></div>
+
+      <div class="seg-card">
+        <div>
+          <h3 style="margin:6px 0;">KPI</h3>
+          <div id="segKpi" class="metrics"></div>
+          <div id="segTimeChart" style="height:320px; margin-top:10px;"></div>
+        </div>
+        <div>
+          <h3 style="margin:6px 0;">カテゴリ Top20</h3>
+          <div id="segCatTable"></div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <h3 style="margin:6px 0;">商品 Top100</h3>
+        <div id="segProdTable"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 以降プレースホルダ -->
   <div id="repeatOnlyTab" class="tabcontent"><div class="card"><p class="muted">リピート分析は後続で実装します。</p></div></div>
   <div id="pairOnlyTab" class="tabcontent"><div class="card"><p class="muted">併売分析は後続で実装します。</p></div></div>
 
@@ -364,6 +413,12 @@
     let lastRfmRows = null;
     let lastRfmMeta = null;
 
+    // セグメント保持
+    let lastSegMeta = null;
+    let lastSegTime = null;
+    let lastSegProd = null;
+    let lastSegCat = null;
+
     // ===== カテゴリマスタ自動読込 =====
     async function autoLoadCategory(){
       const badge = els.catStatus;
@@ -489,10 +544,10 @@
           if(!txMap.has(key)) continue;
           const txRec = txMap.get(key);
 
-          let 商品名2 = r.商品名;
-          let 商品分類 = "";
-          let 小分類名 = "";
-          let 原価 = 0;
+        let 商品名2 = r.商品名;
+        let 商品分類 = "";
+        let 小分類名 = "";
+        let 原価 = 0;
 
           if (masterMap && masterMap.has(r.JANコード)){
             const m = masterMap.get(r.JANコード);
@@ -545,7 +600,7 @@
 
         // 日付UIの初期値
         if (dMin && dMax){
-          ["best","time","prod","rfm"].forEach(prefix=>{
+          ["best","time","prod","rfm","seg"].forEach(prefix=>{
             $(prefix+"Start").min = $(prefix+"End").min = fmtDate(dMin);
             $(prefix+"Start").max = $(prefix+"End").max = fmtDate(dMax);
             $(prefix+"Start").value = fmtDate(dMin);
@@ -854,7 +909,7 @@
       $("prodDiag").innerHTML = `明細行: ${rows.length.toLocaleString()} / レシート: ${receiptSet.size.toLocaleString()} / 最小日時: ${fmtDateSlash(minDate(rows))} / 最大日時: ${fmtDateSlash(maxDate(rows))}`;
     }
 
-    // ===== RFM =====
+    // ===== RFM（既存）=====
     function quantiles(arr, qs){
       const a = arr.slice().sort((x,y)=>x-y);
       const res = [];
@@ -1027,6 +1082,215 @@
       const a=document.createElement("a"); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
+    // ===== セグメント分析（新規） =====
+    function computeSegmentAnalysis(){
+      if (!joined.length){
+        $("segInfo").textContent="先にCSVを取り込んでください。";
+        $("segKpi").innerHTML=""; $("segProdTable").innerHTML=""; $("segCatTable").innerHTML="";
+        Plotly.purge("segTimeChart"); lastSegMeta=null; lastSegTime=null; lastSegProd=null; lastSegCat=null;
+        $("segExport").disabled = true;
+        return;
+      }
+      const s = $("segStart").value, e = $("segEnd").value;
+      const sDate = s ? new Date(s+"T00:00:00") : null;
+      const eDate = e ? new Date(e+"T23:59:59") : null;
+
+      // 期間フィルタ
+      const inPeriod = joined.filter(r=>{
+        if (!r.生成時間) return false;
+        if (sDate && r.生成時間 < sDate) return false;
+        if (eDate && r.生成時間 > eDate) return false;
+        return true;
+      });
+      if (!inPeriod.length){
+        $("segInfo").textContent="該当データがありません。";
+        $("segKpi").innerHTML=""; $("segProdTable").innerHTML=""; $("segCatTable").innerHTML="";
+        Plotly.purge("segTimeChart"); $("segExport").disabled = true;
+        lastSegMeta=null; lastSegTime=null; lastSegProd=null; lastSegCat=null;
+        return;
+      }
+
+      // RFM（期間内）でセグメントを付与（税抜き前提で M=明細金額）
+      // 1) 顧客別 M/last、2) レシート別で F 集計、3) 分位スコア→セグメント名
+      const receiptMap = new Map();
+      for (const r of inPeriod){
+        const k = `${r.CGID}||${r.オーダーID}`;
+        if (!receiptMap.has(k)) receiptMap.set(k,{ CGID:r.CGID, ts:r.生成時間 });
+        const o = receiptMap.get(k); if (r.生成時間 && r.生成時間 > o.ts) o.ts = r.生成時間;
+      }
+      const byUser = new Map();
+      for (const r of inPeriod){
+        const k=r.CGID||"-"; if (!byUser.has(k)) byUser.set(k,{ CGID:k, M:0, last:null, F:0 });
+        const u=byUser.get(k);
+        u.M += (r.明細金額 || 0);
+        if (!u.last || r.生成時間 > u.last) u.last = r.生成時間;
+      }
+      for (const rec of receiptMap.values()){
+        const k = rec.CGID || "-";
+        if (!byUser.has(k)) byUser.set(k,{ CGID:k, M:0, last:null, F:0 });
+        byUser.get(k).F += 1;
+      }
+
+      const baseDate = eDate || maxDate(inPeriod) || new Date();
+      const users = [];
+      for (const u of byUser.values()){
+        if (!u.last) continue;
+        const R_days = Math.max(0, Math.floor((baseDate - u.last)/(1000*60*60*24)));
+        users.push({ CGID:u.CGID, R_days, F:u.F||0, M:u.M||0, last:u.last });
+      }
+      let cutsR, cutsF, cutsM;
+      if (users.length < 100){
+        cutsR = quantiles(users.map(x=>x.R_days), [1/3,2/3]);
+        cutsF = quantiles(users.map(x=>x.F),      [1/3,2/3]);
+        cutsM = quantiles(users.map(x=>x.M),      [1/3,2/3]);
+      }else{
+        cutsR = quantiles(users.map(x=>x.R_days), [0.2,0.4,0.6,0.8]);
+        cutsF = quantiles(users.map(x=>x.F),      [0.2,0.4,0.6,0.8]);
+        cutsM = quantiles(users.map(x=>x.M),      [0.2,0.4,0.6,0.8]);
+      }
+      const withSeg = users.map(x=>{
+        const Rs=scoreByQuantile(x.R_days, cutsR, true);
+        const Fs=scoreByQuantile(x.F, cutsF, false);
+        const Ms=scoreByQuantile(x.M, cutsM, false);
+        return { ...x, seg: rfmSegmentName(Rs, Fs, Ms) };
+      });
+
+      // 選択セグメント
+      const selected = Array.from(document.querySelectorAll(".segChk:checked")).map(el=>el.value);
+      const selSet = new Set(selected);
+      const targetUsers = new Set(withSeg.filter(u=> selSet.has(u.seg)).map(u=>u.CGID));
+      const rows = inPeriod.filter(r=> targetUsers.has(r.CGID));
+
+      // KPI
+      const userCnt = targetUsers.size;
+      const receiptSet = new Set(rows.map(r=> r.オーダーID));
+      const receipts = receiptSet.size;
+      const sumQty = rows.reduce((s,x)=> s + (x.商品数||0), 0);
+      const sumAmt = rows.reduce((s,x)=> s + (x.明細金額||0), 0);
+
+      const kpiHtml = `
+        <div class="metric">対象ユーザー数: <span class="kpi-strong">${userCnt.toLocaleString()}</span></div>
+        <div class="metric">レシート数合計: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
+        <div class="metric">レシート/人: <span class="kpi-strong">${(userCnt? (receipts/userCnt):0).toFixed(2)}</span></div>
+        <div class="metric">購買点数合計: <span class="kpi-strong">${Math.round(sumQty).toLocaleString()}</span></div>
+        <div class="metric">点数/人: <span class="kpi-strong">${(userCnt? (sumQty/userCnt):0).toFixed(2)}</span></div>
+        <div class="metric">購買額合計(税抜): <span class="kpi-strong">${Math.round(sumAmt).toLocaleString()}</span></div>
+        <div class="metric">購買額/人(税抜): <span class="kpi-strong">${(userCnt? (sumAmt/userCnt):0).toFixed(2)}</span></div>
+      `;
+      $("segKpi").innerHTML = kpiHtml;
+
+      // 商品Top100
+      const byJan = new Map();
+      for (const r of rows){
+        const k = r.JANコード || "-";
+        if (!byJan.has(k)){
+          byJan.set(k, { JANコード:k, 商品名:r.商品名||"", 小分類名:r.小分類名||"", 金額:0, 点数:0, UU:new Set() });
+        }
+        const o = byJan.get(k);
+        o.金額 += (r.明細金額||0);
+        o.点数 += (r.商品数||0);
+        if (r.CGID) o.UU.add(r.CGID);
+      }
+      const prodList = Array.from(byJan.values()).map(o=>({
+        JANコード:o.JANコード, 商品名:o.商品名, 小分類名:o.小分類名,
+        売上金額合計:Math.round(o.金額), 売上点数合計:Math.round(o.点数), ユニークユーザー数:o.UU.size
+      }));
+      prodList.sort((a,b)=> b.売上金額合計 - a.売上金額合計 || b.売上点数合計 - a.売上点数合計);
+      const prodTop100 = prodList.slice(0,100);
+      renderTable(prodTop100, "segProdTable",
+        ["JANコード","商品名","小分類名","売上金額合計","売上点数合計","ユニークユーザー数"], null);
+
+      // カテゴリTop20（小分類名優先、無ければ商品分類）
+      const byCat = new Map();
+      for (const r of rows){
+        const key = r.小分類名 || r.商品分類 || "-";
+        if (!byCat.has(key)) byCat.set(key,{ カテゴリ:key, 金額:0, 点数:0, UU:new Set() });
+        const o = byCat.get(key);
+        o.金額 += (r.明細金額||0);
+        o.点数 += (r.商品数||0);
+        if (r.CGID) o.UU.add(r.CGID);
+      }
+      const catList = Array.from(byCat.values()).map(o=>({
+        カテゴリ:o.カテゴリ, 売上金額合計:Math.round(o.金額), 売上点数合計:Math.round(o.点数), ユニークユーザー数:o.UU.size
+      }));
+      catList.sort((a,b)=> b.売上金額合計 - a.売上金額合計 || b.売上点数合計 - a.売上点数合計);
+      const catTop20 = catList.slice(0,20);
+      renderTable(catTop20, "segCatTable", ["カテゴリ","売上金額合計","売上点数合計","ユニークユーザー数"], null);
+
+      // 時間帯（0-23）売上線グラフ
+      const buckets = Array.from({length:24}, (_,h)=>({h, amt:0}));
+      for (const r of rows){
+        const h = r.生成時間.getHours();
+        buckets[h].amt += (r.明細金額||0);
+      }
+      Plotly.newPlot("segTimeChart", [{
+        type:"scatter", mode:"lines+markers",
+        x: buckets.map(b=> String(b.h).padStart(2,"0")+":00"),
+        y: buckets.map(b=> Math.round(b.amt)),
+        name:"売上金額(税抜)"
+      }], {
+        margin:{l:50,r:10,t:10,b:40},
+        xaxis:{title:"時間帯（時）"},
+        yaxis:{title:"売上金額(税抜)", rangemode:"tozero"},
+        displayModeBar:false
+      }, {responsive:true});
+
+      $("segInfo").textContent = `期間: ${s||"-"} ~ ${e||"-"} / 対象セグメント: ${selected.join(", ")||"（未選択）"} / 明細: ${rows.length.toLocaleString()} 行`;
+
+      // 保存してCSV出力で使う
+      lastSegMeta = { start:s||"", end:e||"", segs:selected };
+      lastSegTime = buckets.map(b=> ({ 時:b.h, 金額:Math.round(b.amt) }));
+      lastSegProd = prodTop100;
+      lastSegCat  = catTop20;
+      $("segExport").disabled = rows.length===0;
+    }
+
+    function exportSegCSV(){
+      if (!lastSegMeta) return;
+      const lines = [];
+      const ymd=(s)=> s ? s.replaceAll("-","/") : "-";
+      lines.push(`${ymd(lastSegMeta.start)} ~ ${ymd(lastSegMeta.end)} セグメント分析（${(lastSegMeta.segs||[]).join(" / ")||"未選択"}）`);
+
+      // KPIは再計算せず表からは出さない（簡潔な前書きのみ）
+
+      // 商品 Top100
+      lines.push("商品Top100");
+      let headers=["JANコード","商品名","小分類名","売上金額合計","売上点数合計","ユニークユーザー数"];
+      lines.push(headers.join(","));
+      (lastSegProd||[]).forEach(r=>{
+        const row = headers.map(h=>{let v=r[h]; if(v==null)v=""; v=String(v).replaceAll('"','""'); if(/[",\n]/.test(v)) v=`"${v}"`; return v;});
+        lines.push(row.join(","));
+      });
+
+      // 区切り
+      lines.push("");
+
+      // カテゴリ Top20
+      lines.push("カテゴリTop20");
+      headers=["カテゴリ","売上金額合計","売上点数合計","ユニークユーザー数"];
+      lines.push(headers.join(","));
+      (lastSegCat||[]).forEach(r=>{
+        const row = headers.map(h=>{let v=r[h]; if(v==null)v=""; v=String(v).replaceAll('"','""'); if(/[",\n]/.test(v)) v=`"${v}"`; return v;});
+        lines.push(row.join(","));
+      });
+
+      lines.push("");
+      // 時間帯テーブル
+      lines.push("時間帯,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23");
+      const hours = Array.from({length:24},(_,h)=> h);
+      const amtByH = new Array(24).fill(0);
+      (lastSegTime||[]).forEach(o=>{ amtByH[o.時] = o.金額; });
+      lines.push(["金額"].concat(amtByH.map(v=> Math.round(v))).join(","));
+
+      const csv = "\uFEFF" + lines.join("\n");
+      const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+      const fn = `${lastSegMeta.start||"all"}_${lastSegMeta.end||"all"}_segment.csv`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = fn; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
     // ===== UI配線 =====
     function updateButton(){
       const ok = (els.txInput?.files?.length===1 && els.lnInput?.files?.length===1);
@@ -1105,6 +1369,10 @@
       // RFM
       $("rfmRun")?.addEventListener("click", computeRFM);
       $("rfmExport")?.addEventListener("click", exportRFM);
+
+      // セグメント分析
+      $("segRun")?.addEventListener("click", computeSegmentAnalysis);
+      $("segExport")?.addEventListener("click", exportSegCSV);
 
       // 初期UI
       updateButton();
