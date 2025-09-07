@@ -78,9 +78,6 @@
       <div class="fileline">
         <button id="pickPm" class="btn secondary">商品マスタ取り込み(csv)</button>
         <span id="fnamePm" class="fname muted">未選択</span>
-      </div>
-
-      <span id="status" class="muted" style="margin-left:auto;">CSVを2つ選択してください</span>
     </div>
 
     <!-- 実体の file input -->
@@ -89,12 +86,12 @@
     <input id="pmFile" type="file" accept=".csv" />
 
     <div class="btn-group" style="margin-top:8px;">
-      <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
-      <span id="catStatus" class="muted">カテゴリマスタ：起動時にGitHubから自動読込</span>
+      <button id="runBtn" class="btn" disabled>集計実行</button>
+      <span id="catStatus" class="muted">カテゴリマスタ：サーバーから取り込み済み</span>
     </div>
 
     <p class="muted" style="margin-top:8px;">
-      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code>（ExcelのM列）
+      　
     </p>
   </div>
 
