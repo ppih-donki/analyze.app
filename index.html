@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <title>小売ダッシュボード (完全クライアント / JS版)</title>
+  <title>無人店舗分析ツール</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Plotly / PapaParse -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
@@ -14,11 +14,12 @@
     .row { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
     .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     .full { grid-column:1 / -1; }
-    .btn { background:var(--ink); color:#fff; padding:8px 12px; border-radius:8px; border:none; cursor:pointer; }
+    .btn { background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }
     .btn.secondary { background:#374151; }
     .btn.ghost { background:transparent; color:var(--ink); border:1px solid var(--border); }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
-    label { font-weight:600; display:block; margin-bottom:6px; }
+    .btn-group { display:flex; gap:8px; flex-wrap:wrap; }
+    label { font-weight:700; display:block; margin-bottom:6px; }
     input[type="file"], select, input[type="number"], input[type="range"] {
       padding:8px; border:1px solid var(--border); border-radius:8px; width:100%;
     }
@@ -31,7 +32,7 @@
     .actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     /* tabs */
     .tabs { display:flex; gap:8px; margin:12px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; }
-    .tab { padding:8px 12px; border:1px solid var(--border); border-bottom:none; border-radius:8px 8px 0 0; background:#f9fafb; cursor:pointer; }
+    .tab { padding:10px 12px; border:1px solid var(--border); border-bottom:none; border-radius:8px 8px 0 0; background:#f9fafb; cursor:pointer; }
     .tab.active { background:#fff; font-weight:700; }
     .tabcontent { display:none; }
     .tabcontent.active { display:block; }
@@ -47,53 +48,56 @@
   </style>
 </head>
 <body>
-  <h1>小売ダッシュボード（完全クライアント / JS版）</h1>
+  <h1>無人店舗分析ツール</h1>
   <p class="muted">データはブラウザ内でのみ処理され、サーバーへ送信されません。</p>
 
-  <!-- 取込 -->
-  <div class="card row">
-    <div>
-      <label>取引毎.csv（レシート情報）</label>
-      <input id="txFile" type="file" accept=".csv" />
+  <!-- 取込（UI刷新） -->
+  <div class="card">
+    <label style="margin-bottom:10px;">csv取り込み</label>
+    <div class="btn-group" style="margin-bottom:8px;">
+      <button id="pickTx" class="btn">取引毎</button>
+      <button id="pickLn" class="btn">商品毎</button>
     </div>
-    <div>
-      <label>商品毎.csv（単品明細）</label>
-      <input id="lnFile" type="file" accept=".csv" />
+    <div class="btn-group">
+      <button id="pickPm" class="btn secondary">商品マスタ取り込み(csv)</button>
+      <span id="status" class="muted" style="align-self:center;">CSVを2つ選択してください</span>
     </div>
-    <div class="full">
-      <label>（任意）商品マスタ product_master.csv（列: 商品コード, 商品名, 商品分類）</label>
-      <input id="pmFile" type="file" accept=".csv" />
+
+    <!-- 実体のfile inputは非表示（ボタンで開く） -->
+    <input id="txFile" type="file" accept=".csv" style="display:none;" />
+    <input id="lnFile" type="file" accept=".csv" style="display:none;" />
+    <input id="pmFile" type="file" accept=".csv" style="display:none;" />
+
+    <div class="actions" style="margin-top:12px;">
+      <button id="runBtn" class="btn" disabled>取り込み & 集計（RFMまで）</button>
     </div>
-    <div class="full actions">
-      <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
-      <span id="status" class="muted">CSVを2つ選択してください</span>
-    </div>
+    <p class="muted" style="margin-top:8px;">
+      商品マスタ：列例）JAN / 商品名 / カテゴリー中分類 / カテゴリー小分類 / 原価（粗利計算用）
+    </p>
   </div>
 
-  <!-- タブ -->
+  <!-- タブ（指定の8分類） -->
   <div class="tabs">
-    <div class="tab active" data-tab="previewTab">プレビュー</div>
-    <div class="tab" data-tab="rfmTab">RFM / セグメント</div>
-    <div class="tab" data-tab="buyTab">購買分析</div>
-    <div class="tab" data-tab="timeTab">時間帯分析</div>
-    <div class="tab" data-tab="prodTab">商品ランキング</div>
-    <div class="tab" data-tab="exportTab">エクスポート</div>
+    <div class="tab active" data-tab="previewTab">取り込みデータsummary</div>
+    <div class="tab" data-tab="buyTab">ベスレポ集計</div>
+    <div class="tab" data-tab="timeTab">時間帯集計</div>
+    <div class="tab" data-tab="prodTab">単品分析</div>
+    <div class="tab" data-tab="rfmTab">RFM分析</div>
+    <div class="tab" data-tab="segTab">セグメント分析</div>
+    <div class="tab" data-tab="repeatOnlyTab">リピート分析</div>
+    <div class="tab" data-tab="pairOnlyTab">併売分析</div>
   </div>
 
-  <!-- プレビュー -->
+  <!-- 取り込みデータsummary -->
   <div id="previewTab" class="tabcontent active">
     <div class="card">
       <h2>取り込みサマリー</h2>
       <div class="metrics" id="summary"></div>
-      <div class="actions">
-        <button id="dlJoinedQuick" class="btn">Joined明細（全件CSV）</button>
-        <span class="muted">下は先頭50行のみ表示（確認用）</span>
-      </div>
-      <div id="preview"></div>
+      <div id="preview" style="margin-top:8px;"></div>
     </div>
   </div>
 
-  <!-- RFM / セグメント -->
+  <!-- RFM / セグメント（既存機能はRFMタブに集約） -->
   <div id="rfmTab" class="tabcontent">
     <div class="card row">
       <div>
@@ -114,9 +118,6 @@
           <span class="muted">セグメント定義を確認</span>
         </div>
         <button id="recalcBtn" class="btn">再計算（セグメント反映）</button>
-        <button id="rfmPngBtn" class="btn secondary">スコア分布PNG</button>
-        <button id="dlRFM" class="btn">RFM結果CSV</button>
-        <button id="dlSeg" class="btn">セグメント一覧CSV</button>
       </div>
     </div>
 
@@ -124,8 +125,6 @@
       <div id="segPie" class="full" style="height:420px;"></div>
       <div id="rfHeat" class="full" style="height:420px;"></div>
       <div id="scoreBars" class="full" style="height:360px;"></div>
-
-      <!-- セグメントごとサンプル -->
       <div class="full">
         <h3 style="margin:8px 0 6px;">セグメント別サンプル（各最大3件）</h3>
         <div id="rfmSample"></div>
@@ -133,7 +132,17 @@
     </div>
   </div>
 
-  <!-- 購買分析 -->
+  <!-- セグメント分析（現状はRFMと同内容を参照・後で独立させます） -->
+  <div id="segTab" class="tabcontent">
+    <div class="card">
+      <p class="muted" style="margin-top:0;">
+        ※現在は <b>RFM分析</b> と同じ内容を参照しています。閾値UIやセグメント別KPIの深掘りは、このタブに切り出して実装します。
+      </p>
+      <div id="segMirror" class="muted">（RFMタブを参照してください）</div>
+    </div>
+  </div>
+
+  <!-- ベスレポ集計（＝既存の購買分析を掲出） -->
   <div id="buyTab" class="tabcontent">
     <div class="card row">
       <div>
@@ -153,7 +162,6 @@
       </div>
       <div class="full actions">
         <button id="runRank" class="btn">単品ランキングを集計</button>
-        <button id="dlRank" class="btn">ランキングCSV</button>
       </div>
     </div>
 
@@ -165,9 +173,9 @@
     <div class="card">
       <div class="kpi">
         <h3 style="margin:0;">併売ランキング（A→B）</h3>
-        <span class="badge" title="全レシートのうちAとBを同時に買った割合">同時購入率=Support</span>
-        <span class="badge" title="Aを買った人のうちBも買った割合">A購入者のうち割合=Confidence</span>
-        <span class="badge" title="偶然よりも一緒に買われやすいか（1より大きいほど強い）">基準比=Lift</span>
+        <span class="badge">同時購入率=Support</span>
+        <span class="badge">A購入者のうち割合=Confidence</span>
+        <span class="badge">基準比=Lift</span>
       </div>
       <div class="grid2" style="margin-top:8px;">
         <div>
@@ -189,14 +197,13 @@
       </div>
       <div class="actions" style="margin-top:8px;">
         <button id="runPairs" class="btn">併売を集計</button>
-        <button id="dlPairs" class="btn">併売CSV</button>
         <span class="muted">※計算量対策：出現10件未満のSKUは自動除外・1バスケット50品まで</span>
       </div>
       <div id="pairTable" class="full"></div>
     </div>
   </div>
 
-  <!-- 時間帯分析（新タブ） -->
+  <!-- 時間帯集計 -->
   <div id="timeTab" class="tabcontent">
     <div class="card row">
       <div>
@@ -216,7 +223,6 @@
       </div>
       <div class="full actions">
         <button id="runHourRank" class="btn">時間帯別・単品ランキング</button>
-        <button id="dlHourRank" class="btn">CSV</button>
       </div>
     </div>
 
@@ -228,9 +234,9 @@
     <div class="card">
       <div class="kpi">
         <h3 style="margin:0;">時間帯別・併売ランキング（A→B）</h3>
-        <span class="badge" title="全レシートのうちAとBを同時に買った割合">同時購入率</span>
-        <span class="badge" title="Aを買った人のうちBも買った割合">A購入者のうち割合</span>
-        <span class="badge" title="偶然よりも一緒に買われやすいか（1より大きいほど強い）">基準比（Lift）</span>
+        <span class="badge">同時購入率</span>
+        <span class="badge">A購入者のうち割合</span>
+        <span class="badge">基準比（Lift）</span>
       </div>
       <div class="grid2" style="margin-top:8px;">
         <div>
@@ -252,14 +258,13 @@
       </div>
       <div class="actions" style="margin-top:8px;">
         <button id="runHourPairs" class="btn">時間帯別・併売を集計</button>
-        <button id="dlHourPairs" class="btn">CSV</button>
         <span class="muted">※UIDは使用しません。出現10件未満のSKUは自動除外・1バスケット50品まで。</span>
       </div>
       <div id="hourPairTable" class="full"></div>
     </div>
   </div>
 
-  <!-- 商品ランキング -->
+  <!-- 単品分析（＝人気/リピートの集計画面） -->
   <div id="prodTab" class="tabcontent">
     <div class="card row">
       <div>
@@ -273,15 +278,13 @@
       <div class="full help">
         <b>定義</b>：  
         <ul style="margin:6px 0 0 18px;">
-          <li><b>最もリピートされている商品</b>…同一顧客が<strong>異なる注文で2回以上</strong>購入したユニーク顧客数（≒リピーター数）で並べ替え</li>
+          <li><b>最もリピートされている商品</b>…同一顧客が<strong>異なる注文で2回以上</strong>購入したユニーク顧客数</li>
           <li><b>人気商品</b>…<strong>ユニーク購入者数</strong>が多い順</li>
         </ul>
       </div>
       <div class="full actions">
         <button id="runRepeat" class="btn">リピート商品を集計</button>
-        <button id="dlRepeat" class="btn">リピートCSV</button>
         <button id="runPopular" class="btn secondary">人気商品を集計</button>
-        <button id="dlPopular" class="btn secondary">人気CSV</button>
       </div>
     </div>
 
@@ -297,15 +300,17 @@
     </div>
   </div>
 
-  <!-- エクスポート -->
-  <div id="exportTab" class="tabcontent">
+  <!-- リピート分析（現状は単品分析タブの結果を参照） -->
+  <div id="repeatOnlyTab" class="tabcontent">
     <div class="card">
-      <h2>CSV / PNG ダウンロード</h2>
-      <div class="actions">
-        <button id="dlJoined" class="btn">Joined明細CSV</button>
-        <button id="dlPie" class="btn secondary">セグメント円グラフPNG</button>
-        <button id="dlRFHeat" class="btn secondary">R×FヒートPNG</button>
-      </div>
+      <p class="muted">※現在は <b>単品分析</b> タブで「リピート商品を集計」を実行してご確認ください。専用ビューはこのタブに実装予定です。</p>
+    </div>
+  </div>
+
+  <!-- 併売分析（現状はベスレポ集計タブの結果を参照） -->
+  <div id="pairOnlyTab" class="tabcontent">
+    <div class="card">
+      <p class="muted">※現在は <b>ベスレポ集計</b> タブ下部の「併売ランキング」をご利用ください。セグメント別・時間帯別の専用ビューはこのタブに統合予定です。</p>
     </div>
   </div>
 
@@ -337,6 +342,11 @@
     const txInput = $("txFile"), lnInput = $("lnFile"), pmInput = $("pmFile");
     const runBtn  = $("runBtn"), statusEl = $("status");
 
+    // ボタンで file input を開く
+    $("pickTx").addEventListener("click", ()=> txInput.click());
+    $("pickLn").addEventListener("click", ()=> lnInput.click());
+    $("pickPm").addEventListener("click", ()=> pmInput.click());
+
     function updateButton() {
       runBtn.disabled = !(txInput.files.length === 1 && lnInput.files.length === 1);
       statusEl.className = "muted";
@@ -344,6 +354,7 @@
     }
     txInput.addEventListener("change", updateButton);
     lnInput.addEventListener("change", updateButton);
+    pmInput.addEventListener("change", ()=>{ /* 次ステップで利用 */ });
 
     function normalizeHeader(h){ return String(h || "").replace(/\ufeff/g,"").trim(); }
     function parseCSVFile(file){
@@ -379,18 +390,6 @@
     function pie(elId, labels, values, title){
       Plotly.newPlot(elId, [{labels,values,type:"pie",hole:.45}], {title, margin:{l:24,r:24,t:40,b:24}}, {displayModeBar:false});
     }
-    function toCSV(rows, headers=null){
-      if (!rows || rows.length===0) return "";
-      const cols = headers || Object.keys(rows[0]);
-      const esc = v => `"${String(v??"").replace(/"/g,'""')}"`;
-      const lines = [cols.join(",")]; rows.forEach(r=> lines.push(cols.map(c=>esc(r[c])).join(","))); return lines.join("\r\n");
-    }
-    function downloadCSV(filename, rows, headers=null){
-      const csv = toCSV(rows, headers);
-      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'}); const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
-    }
-    function downloadPNG(divId, filename){ Plotly.downloadImage(divId, {format:'png', filename, height:600, width:960}); }
 
     // ===== グローバル =====
     let joined = [];   // JOIN済み明細
@@ -505,7 +504,6 @@
       const uidSet = new Set(rfm.filter(r=>r.セグメント===seg).map(r=>r.CGID));
       return joined.filter(r=> uidSet.has(r.CGID));
     }
-
     function runRanking(){
       const seg = $("segFilter").value, metric = $("rankMetric").value, top = Number($("rankTopN").value);
       const rows = filteredRowsBySeg(seg);
@@ -586,10 +584,8 @@
         ["A_JAN","A_商品名","B_JAN","B_商品名","同時購入回数","同時購入率","A購入者のうち割合","基準比"], topN);
     }
 
-    // リピート / 人気
-    function filteredRowsBySegForProd(seg){
-      return filteredRowsBySeg(seg);
-    }
+    // 商品ランキング（人気/リピート）
+    function filteredRowsBySegForProd(seg){ return filteredRowsBySeg(seg); }
     function runRepeatRanking(){
       const seg = $("segFilter2").value, top = Number($("prodTopN").value);
       const rows = filteredRowsBySegForProd(seg);
@@ -754,7 +750,7 @@
           r.JANコード=String(r.JANコード??"").trim(); r.商品名=String(r.商品名??"").trim();
           r.生成時間=parseDate(r.生成時間); r.商品数=Math.trunc(toNumber(r.商品数,0)); r.商品価格=toNumber(r.商品価格,0); });
 
-        // マスタ（任意）
+        // マスタ（任意）— 次ステップで拡張（商品名/分類/原価など）
         let pmMap=null;
         if(pmRows.length){
           pmMap=new Map();
@@ -811,38 +807,19 @@
 
     // ランキング（セグメント）
     $("runRank").addEventListener("click", runRanking);
-    $("dlRank").addEventListener("click", ()=> { if(!rankRows.length){ alert("先にランキングを集計してください"); return; }
-      downloadCSV("ranking.csv", rankRows, ["JANコード","商品名","数量","金額"]); });
 
     // 併売（セグメント）
     $("runPairs").addEventListener("click", runCooccurrence);
-    $("dlPairs").addEventListener("click", ()=> { if(!pairRows.length){ alert("先に併売を集計してください"); return; }
-      downloadCSV("cooccurrence.csv", pairRows, ["A_JAN","A_商品名","B_JAN","B_商品名","同時購入回数","同時購入率","A購入者のうち割合","基準比"]); });
 
     // 商品ランキング
     $("runRepeat").addEventListener("click", runRepeatRanking);
-    $("dlRepeat").addEventListener("click", ()=>{ if(!repeatRows.length){ alert("先にリピート集計してください"); return; }
-      downloadCSV("repeat_products.csv", repeatRows, ["JANコード","商品名","リピーター数","ユニーク購入者数"]); });
     $("runPopular").addEventListener("click", runPopularRanking);
-    $("dlPopular").addEventListener("click", ()=>{ if(!popularRows.length){ alert("先に人気集計してください"); return; }
-      downloadCSV("popular_products.csv", popularRows, ["JANコード","商品名","ユニーク購入者数"]); });
 
     // 時間帯分析
     $("runHourRank").addEventListener("click", runHourlyProductRanking);
-    $("dlHourRank").addEventListener("click", ()=>{ if(!hourRankRows.length){ alert("先に時間帯別ランキングを集計してください"); return; }
-      downloadCSV("hour_products.csv", hourRankRows, ["JANコード","商品名","数量","金額"]); });
     $("runHourPairs").addEventListener("click", runHourlyPairs);
-    $("dlHourPairs").addEventListener("click", ()=>{ if(!hourPairRows.length){ alert("先に時間帯別併売を集計してください"); return; }
-      downloadCSV("hour_cooccurrence.csv", hourPairRows, ["A_JAN","A_商品名","B_JAN","B_商品名","同時購入回数","同時購入率","A購入者のうち割合","基準比"]); });
 
-    // PNG/CSV
-    $("rfmPngBtn").addEventListener("click", ()=> downloadPNG("scoreBars","rfm_scores"));
-    $("dlPie").addEventListener("click", ()=> downloadPNG("segPie","segment_pie"));
-    $("dlRFHeat").addEventListener("click", ()=> downloadPNG("rfHeat","rf_heatmap"));
-    $("dlJoined").addEventListener("click", ()=> downloadCSV("joined.csv", joined, ["CGID","オーダーID","生成時間","JANコード","商品名","商品分類","商品数","商品価格","明細金額"]));
-    $("dlJoinedQuick").addEventListener("click", ()=> $("dlJoined").click());
-
-    // タブ
+    // タブ切替
     document.querySelectorAll(".tab").forEach(t=>{
       t.addEventListener("click", ()=>{
         document.querySelectorAll(".tab,.tabcontent").forEach(x=>x.classList.remove("active"));
@@ -855,8 +832,10 @@
     $("closeDef").addEventListener("click", ()=> $("defModal").classList.remove("show"));
 
     // 初期
-    updateButton();
-    buildHourOptions();
+    (function init(){
+      statusEl.textContent = "CSVを2つ選択してください";
+      buildHourOptions();
+    })();
   </script>
 </body>
 </html>
