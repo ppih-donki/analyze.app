@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <title>無人店舗分析ツール</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Plotly / PapaParse（CDN） -->
+  <!-- ライブラリ（CDN） -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
   <style>
@@ -59,8 +59,7 @@
       <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
     </div>
     <p class="muted" style="margin-top:8px;">
-      商品マスタの列：<code>JAN</code> / <code>商品名</code> / <code>原価</code> / <code>カテゴリー：小分類コード</code> / <code>カテゴリー：小分類名</code>
-      （小分類コードは最大6桁を想定）
+      商品マスタの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用可）/ <code>POS原価</code>
     </p>
   </div>
 
@@ -80,16 +79,14 @@
   <div id="previewTab" class="tabcontent active">
     <div class="card">
       <h2>取り込みサマリー</h2>
-      <div class="metrics" id="summary">
-        <!-- KPIを描画 -->
-      </div>
+      <div class="metrics" id="summary"></div>
       <div class="full">
         <div id="preview" class="muted">（先頭50行プレビューを表示）</div>
       </div>
     </div>
   </div>
 
-  <!-- 以降のタブは後続で実装 -->
+  <!-- 他タブは実装前のプレースホルダ -->
   <div id="bestTab" class="tabcontent"><div class="card"><p class="muted">ベスレポ集計は後続で実装します。</p></div></div>
   <div id="timeTab" class="tabcontent"><div class="card"><p class="muted">時間帯集計は後続で実装します。</p></div></div>
   <div id="prodTab" class="tabcontent"><div class="card"><p class="muted">単品分析は後続で実装します。</p></div></div>
@@ -132,7 +129,7 @@
     }
     function parseDate(s){
       if(!s) return null;
-      const t = String(s).trim().replace(/\s+/g," "); // 「2025/8/5  21:53:13」に耐性
+      const t = String(s).trim().replace(/\s+/g," "); // 「2025/8/5  21:53:13」のような空白の重複にも耐性
       const d = new Date(t);
       return isNaN(d.getTime()) ? null : d;
     }
@@ -163,11 +160,11 @@
     }
     txInput.addEventListener("change", updateButton);
     lnInput.addEventListener("change", updateButton);
-    pmInput.addEventListener("change", ()=>{/* 任意 */});
+    pmInput.addEventListener("change", ()=>{/* マスタは任意 */});
 
     // ===== 状態 =====
     let joined = [];   // JOIN済み明細
-    let masterMap = null; // JAN -> {商品名, 原価, 小分類コード, 小分類名}
+    let masterMap = null; // JAN(=商品コード) -> {商品名, 商品分類, POS原価}
 
     // ===== 取り込み & JOIN & サマリー =====
     async function runImport(){
@@ -183,7 +180,7 @@
         let pmRows = [];
         if (pmInput.files.length===1) pmRows = await parseCSVFile(pmInput.files[0]);
 
-        // 必須列
+        // 必須列（取引毎 / 商品毎）
         const needTx = new Set(["CGID","オーダーID","生成時間"]);
         const needLn = new Set(["CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"]);
         const hasAll=(rows,need)=> rows.length && [...need].every(c=> Object.prototype.hasOwnProperty.call(rows[0],c));
@@ -193,7 +190,7 @@
           return;
         }
 
-        // 整形
+        // 整形（取引毎 / 商品毎）
         txRows.forEach(r=>{
           r.CGID = String(r.CGID ?? "").trim();
           r.オーダーID = String(r.オーダーID ?? "").trim();
@@ -209,23 +206,27 @@
           r.商品価格 = toNumber(r.商品価格, 0);
         });
 
-        // 商品マスタ（任意）
+        // 商品マスタ（任意）— 指定列に合わせて取り込み
         masterMap = null;
         if (pmRows.length){
           masterMap = new Map();
           pmRows.forEach(r=>{
-            const jan = String(r["JAN"] ?? r["JANコード"] ?? "").trim();
+            // キー
+            const jan = String(r["商品コード"] ?? r["JANコード"] ?? "").trim();
             if(!jan) return;
+
+            // 商品名は優先順位：商品名 -> 商品名規格
+            const nm = String((r["商品名"] ?? r["商品名規格"] ?? "")).trim();
+
             masterMap.set(jan, {
-              商品名: String(r["商品名"] ?? "").trim(),
-              原価: toNumber(r["原価"], 0),
-              小分類コード: String(r["カテゴリー：小分類コード"] ?? "").trim(),
-              小分類名: String(r["カテゴリー：小分類名"] ?? "").trim()
+              商品名: nm,
+              商品分類: String(r["商品分類"] ?? "").trim(),
+              POS原価: toNumber(r["POS原価"], 0)
             });
           });
         }
 
-        // JOIN（キー：CGID + オーダーID）…取引毎の生成時間を優先採用
+        // JOIN（キー：CGID + オーダーID）…取引毎の生成時間を採用
         const txMap = new Map();
         txRows.forEach(r => txMap.set(`${r.CGID}||${r.オーダーID}`, r));
 
@@ -237,13 +238,12 @@
 
           // マスタ適用
           let 商品名2 = r.商品名;
-          let 小分類コード = "", 小分類名 = "", 原価 = 0;
+          let 商品分類 = "", 原価 = 0;
           if (masterMap && masterMap.has(r.JANコード)){
             const m = masterMap.get(r.JANコード);
             if (m.商品名) 商品名2 = m.商品名;
-            小分類コード = m.小分類コード || "";
-            小分類名   = m.小分類名   || "";
-            原価       = toNumber(m.原価, 0);
+            商品分類 = m.商品分類 || "";
+            原価 = toNumber(m.POS原価, 0);
           }
 
           const 明細金額 = (r.商品価格 || 0) * (r.商品数 || 0);
@@ -255,10 +255,10 @@
             生成時間: tx.生成時間 || r.生成時間,
             JANコード: r.JANコード,
             商品名: 商品名2,
-            小分類コード, 小分類名,
+            商品分類,
             商品数: r.商品数,
             商品価格: r.商品価格,
-            原価,
+            POS原価: 原価,
             明細金額,
             明細粗利
           });
@@ -285,7 +285,7 @@
         renderTable(
           joined,
           "preview",
-          ["CGID","オーダーID","生成時間","JANコード","商品名","小分類コード","小分類名","商品数","商品価格","原価","明細金額","明細粗利"],
+          ["CGID","オーダーID","生成時間","JANコード","商品名","商品分類","商品数","商品価格","POS原価","明細金額","明細粗利"],
           50
         );
 
@@ -310,9 +310,7 @@
     document.querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=> onTabClick(t)));
 
     // 初期
-    (function init(){
-      updateButton();
-    })();
+    (function init(){ updateButton(); })();
   </script>
 </body>
 </html>
