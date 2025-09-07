@@ -11,27 +11,28 @@
     :root { --border:#e5e7eb; --muted:#6b7280; --ink:#111827; --bg:#fff; }
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin:16px; color:var(--ink); background:var(--bg); }
     .card { border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; background:#fff; }
-    .row { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-    .full { grid-column:1 / -1; }
     .btn { background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }
     .btn.secondary { background:#374151; }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
-    .btn-group { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .btn-group { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
     label { font-weight:700; display:block; margin-bottom:6px; }
-    input[type="file"] { padding:8px; border:1px solid var(--border); border-radius:8px; width:100%; display:none; }
-    table { width:100%; border-collapse:collapse; font-size:14px; }
-    th, td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
+    input[type="file"] { display:none; }
     .muted { color:var(--muted); font-size:12px; }
     .error { color:#b91c1c; font-weight:700; white-space:pre-wrap; }
     .metrics { display:flex; gap:12px; flex-wrap:wrap; margin:8px 0; }
     .metric { border:1px solid var(--border); border-radius:10px; padding:8px 12px; background:#fafafa; }
     .kpi-strong { font-weight:800; font-size:16px; }
+    /* tabs */
     .tabs { display:flex; gap:8px; margin:12px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; }
     .tab { padding:10px 12px; border:1px solid var(--border); border-bottom:none; border-radius:8px 8px 0 0; background:#f9fafb; cursor:pointer; }
     .tab.active { background:#fff; font-weight:700; }
     .tabcontent { display:none; }
     .tabcontent.active { display:block; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
     .diag { margin-top:8px; padding:8px 10px; border:1px dashed var(--border); border-radius:8px; background:#fafafa; }
+    .fname { font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:#fafafa; }
+    .fileline { display:flex; align-items:center; gap:8px; }
   </style>
 </head>
 <body>
@@ -41,25 +42,38 @@
   <!-- 取込UI -->
   <div class="card">
     <label style="margin-bottom:10px;">csv取り込み</label>
-    <div class="btn-group" style="margin-bottom:8px;">
-      <button id="pickTx" class="btn">取引毎</button>
-      <button id="pickLn" class="btn">商品毎</button>
-      <button id="pickPm" class="btn secondary">商品マスタ取り込み(csv)</button>
-      <span id="status" class="muted" style="align-self:center;">CSVを2つ選択してください</span>
+
+    <div class="btn-group" style="margin-bottom:6px;">
+      <div class="fileline">
+        <button id="pickTx" class="btn">取引毎</button>
+        <span id="fnameTx" class="fname muted">未選択</span>
+      </div>
+
+      <div class="fileline">
+        <button id="pickLn" class="btn">商品毎</button>
+        <span id="fnameLn" class="fname muted">未選択</span>
+      </div>
+
+      <div class="fileline">
+        <button id="pickPm" class="btn secondary">商品マスタ取り込み(csv)</button>
+        <span id="fnamePm" class="fname muted">未選択</span>
+      </div>
+
+      <span id="status" class="muted" style="margin-left:auto;">CSVを2つ選択してください</span>
     </div>
 
-    <!-- 実体の file input（非表示） -->
+    <!-- 実体の file input -->
     <input id="txFile" type="file" accept=".csv" />
     <input id="lnFile" type="file" accept=".csv" />
     <input id="pmFile" type="file" accept=".csv" />
 
-    <div class="btn-group" style="margin-top:12px;">
+    <div class="btn-group" style="margin-top:8px;">
       <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
       <span id="catStatus" class="muted">カテゴリマスタ：起動時にGitHubから自動読込</span>
     </div>
 
     <p class="muted" style="margin-top:8px;">
-      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code>
+      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code>（※ExcelのM列）
     </p>
   </div>
 
@@ -81,9 +95,7 @@
       <h2>取り込みサマリー</h2>
       <div class="metrics" id="summary"></div>
       <div class="diag" id="masterDiag" style="display:none;"></div>
-      <div class="full">
-        <div id="preview" class="muted">（先頭50行プレビューを表示）</div>
-      </div>
+      <div id="preview" class="muted">（先頭50行プレビューを表示）</div>
     </div>
   </div>
 
@@ -109,12 +121,17 @@
         Papa.parse(file, {
           header:true, skipEmptyLines:true, encoding:"UTF-8",
           complete: (res)=>{
+            // ヘッダ正規化
+            const headers = res.meta.fields.map(f=>normalizeHeader(f));
             const data = res.data.map(row=>{
               const o={};
-              Object.keys(row).forEach(k=> o[normalizeHeader(k)] = row[k]);
+              headers.forEach((h,i)=>{
+                const rawKey = res.meta.fields[i];
+                o[h] = row[rawKey];
+              });
               return o;
             });
-            resolve(data);
+            resolve({ data, headers });
           }, error: reject
         });
       });
@@ -124,7 +141,7 @@
     function toNumber(x, def=0){
       if (x === null || x === undefined) return def;
       let s = String(x).trim();
-      // カンマ・円・空白・全角記号など数値以外は除去（小数点・マイナスは残す）
+      // カンマ・円・全角/半角空白・単位などを除去（小数点・マイナスのみ残す）
       s = s.replace(/[^\d.\-]/g, "");
       if (!s) return def;
       const v = Number(s);
@@ -195,7 +212,7 @@
       return map;
     }
 
-    // ===== マスタの柔軟マッピング =====
+    // ===== マスタの柔軟マッピング（M列POS原価優先） =====
     function getFirst(row, keys){
       for (const k of keys){
         if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") return row[k];
@@ -203,22 +220,38 @@
       return "";
     }
 
-    function buildMasterMap(pmRows){
+    function buildMasterMap(pm){
+      const { data: pmRows, headers } = pm;
       const map = new Map();
+
+      // M列(13列目)インデックス
+      const mIndex = 12; // 0-based
+      const hasM = headers.length > mIndex;
+
       for (const r of pmRows){
-        // 商品コード（JAN）候補
+        // 商品コード（JAN）
         const code = String(getFirst(r, ["商品コード","JANコード","JAN","コード"]) ?? "").trim();
         if (!code) continue;
 
-        // 商品名候補
+        // 商品名
         const nm = String(getFirst(r, ["商品名","商品名規格","品名"]) ?? "").trim();
 
-        // 小分類コード候補
+        // 小分類コード
         const cat = String(getFirst(r, ["商品分類","小分類","小分類コード"]) ?? "").trim();
 
-        // 原価候補
-        const costRaw = getFirst(r, ["POS原価","原価","仕入原価","POS原価(税抜)","原価(税抜)"]);
-        const cost = toNumber(costRaw, 0);
+        // 原価：M列を最優先。それ以外は候補名で補完。
+        let cost = 0;
+        if (hasM){
+          // ヘッダ名で取るのではなく、行オブジェクトに見えない場合があるので
+          // Papaでは列名でしか取れない→ヘッダ配列からM列名を取得して参照
+          const mHeader = headers[mIndex];
+          const mVal = r[mHeader];
+          cost = toNumber(mVal, 0);
+        }
+        if (cost === 0){
+          const costRaw = getFirst(r, ["POS原価","原価","仕入原価","POS原価(税抜)","原価(税抜)"]);
+          cost = toNumber(costRaw, 0);
+        }
 
         map.set(code, { 商品名: nm, 商品分類: cat, POS原価: cost });
       }
@@ -232,12 +265,14 @@
       if (statusEl){ statusEl.className = "muted"; statusEl.textContent = "取り込み中…"; }
 
       try{
-        const [txRows, lnRows] = await Promise.all([
+        const [tx, ln] = await Promise.all([
           parseCSVFile(els.txInput.files[0]),
           parseCSVFile(els.lnInput.files[0])
         ]);
-        let pmRows = [];
-        if (els.pmInput.files.length===1) pmRows = await parseCSVFile(els.pmInput.files[0]);
+        let pm = null;
+        if (els.pmInput.files.length===1) pm = await parseCSVFile(els.pmInput.files[0]);
+
+        const txRows = tx.data, lnRows = ln.data;
 
         const needTx = new Set(["CGID","オーダーID","生成時間"]);
         const needLn = new Set(["CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"]);
@@ -265,9 +300,9 @@
         // 商品マスタ（任意）
         masterMap = null;
         let masterInfoText = "商品マスタ：未読込（原価=0扱い）";
-        if (pmRows.length){
-          masterMap = buildMasterMap(pmRows);
-          masterInfoText = `商品マスタ：${pmRows.length.toLocaleString()}行（JANキー: ${masterMap.size.toLocaleString()}件）`;
+        if (pm){
+          masterMap = buildMasterMap(pm);
+          masterInfoText = `商品マスタ：${pm.data.length.toLocaleString()}行（JANキー: ${masterMap.size.toLocaleString()}件）`;
         }
 
         // JOIN
@@ -276,12 +311,12 @@
 
         joined = [];
         let matched = 0;
-        const unmatchedJAN = new Map(); // JAN -> 件数
+        const unmatchedJAN = new Map();
 
         for(const r of lnRows){
           const key = `${r.CGID}||${r.オーダーID}`;
           if(!txMap.has(key)) continue;
-          const tx = txMap.get(key);
+          const txRec = txMap.get(key);
 
           let 商品名2 = r.商品名;
           let 商品分類 = "";
@@ -308,7 +343,7 @@
           joined.push({
             CGID: r.CGID,
             オーダーID: r.オーダーID,
-            生成時間: tx.生成時間 || r.生成時間,
+            生成時間: txRec.生成時間 || r.生成時間,
             JANコード: r.JANコード,
             商品名: 商品名2,
             商品分類,
@@ -321,7 +356,7 @@
           });
         }
 
-        // サマリーKPI
+        // サマリー
         const uniqUsers = new Set(joined.map(x=>x.CGID)).size;
         const receipts  = new Set(joined.map(x=>x.オーダーID)).size;
         const totalQty  = joined.reduce((s,x)=> s + (x.商品数||0), 0);
@@ -329,29 +364,25 @@
         const totalGp   = joined.reduce((s,x)=> s + (x.明細粗利||0), 0);
         const dMin = minDate(joined), dMax = maxDate(joined);
 
-        if ($("summary")){
-          $("summary").innerHTML = `
-            <div class="metric">期間: <span class="kpi-strong">${fmtDate(dMin)} ~ ${fmtDate(dMax)}</span></div>
-            <div class="metric">ユニークユーザー数: <span class="kpi-strong">${uniqUsers.toLocaleString()}</span></div>
-            <div class="metric">レシート件数: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
-            <div class="metric">売上点数合計: <span class="kpi-strong">${totalQty.toLocaleString()}</span></div>
-            <div class="metric">売上金額合計: <span class="kpi-strong">${totalAmt.toLocaleString()}</span></div>
-            <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
-          `;
-        }
+        $("summary").innerHTML = `
+          <div class="metric">期間: <span class="kpi-strong">${fmtDate(dMin)} ~ ${fmtDate(dMax)}</span></div>
+          <div class="metric">ユニークユーザー数: <span class="kpi-strong">${uniqUsers.toLocaleString()}</span></div>
+          <div class="metric">レシート件数: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
+          <div class="metric">売上点数合計: <span class="kpi-strong">${totalQty.toLocaleString()}</span></div>
+          <div class="metric">売上金額合計: <span class="kpi-strong">${totalAmt.toLocaleString()}</span></div>
+          <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
+        `;
 
         // マスタ適用状況の表示（診断）
         const diag = $("masterDiag");
-        if (diag){
-          const rate = joined.length ? Math.round((matched / joined.length) * 100) : 0;
-          let topUnmatched = "";
-          if (unmatchedJAN.size){
-            const arr = Array.from(unmatchedJAN.entries()).sort((a,b)=> b[1]-a[1]).slice(0,10);
-            topUnmatched = "<br>未マッチJAN上位: " + arr.map(([jan,c])=> `${jan}(${c})`).join(", ");
-          }
-          diag.style.display = "block";
-          diag.innerHTML = `${masterInfoText} / 明細行: ${joined.length.toLocaleString()} / マスタ適用: ${matched.toLocaleString()}（${rate}%）${topUnmatched}`;
+        const rate = joined.length ? Math.round((matched / joined.length) * 100) : 0;
+        let topUnmatched = "";
+        if (unmatchedJAN.size){
+          const arr = Array.from(unmatchedJAN.entries()).sort((a,b)=> b[1]-a[1]).slice(0,10);
+          topUnmatched = "<br>未マッチJAN上位: " + arr.map(([jan,c])=> `${jan}(${c})`).join(", ");
         }
+        diag.style.display = "block";
+        diag.innerHTML = `${masterInfoText} / 明細行: ${joined.length.toLocaleString()} / マスタ適用: ${matched.toLocaleString()}（${rate}%）${topUnmatched}`;
 
         // プレビュー
         renderTable(
@@ -371,13 +402,19 @@
     }
 
     function updateButton(){
-      const statusEl = els.status; const runBtn = els.runBtn;
       const ok = (els.txInput?.files?.length===1 && els.lnInput?.files?.length===1);
-      if (runBtn) runBtn.disabled = !ok;
-      if (statusEl){
-        statusEl.className = "muted";
-        statusEl.textContent = ok ? "準備OK。取り込み＆集計できます。" : "CSVを2つ選択してください";
+      if (els.runBtn) els.runBtn.disabled = !ok;
+      if (els.status){
+        els.status.className = "muted";
+        els.status.textContent = ok ? "準備OK。取り込み＆集計できます。" : "CSVを2つ選択してください";
       }
+      // ファイル名の表示
+      $("fnameTx").textContent = els.txInput?.files?.[0]?.name || "未選択";
+      $("fnameTx").classList.toggle("muted", !els.txInput?.files?.length);
+      $("fnameLn").textContent = els.lnInput?.files?.[0]?.name || "未選択";
+      $("fnameLn").classList.toggle("muted", !els.lnInput?.files?.length);
+      $("fnamePm").textContent = els.pmInput?.files?.[0]?.name || "未選択";
+      $("fnamePm").classList.toggle("muted", !els.pmInput?.files?.length);
     }
 
     function onTabClick(t){
@@ -401,18 +438,26 @@
         catStatus: $("catStatus"),
       };
 
+      // ボタン→ファイル選択
       els.pickTx?.addEventListener("click", ()=> els.txInput?.click());
       els.pickLn?.addEventListener("click", ()=> els.lnInput?.click());
       els.pickPm?.addEventListener("click", ()=> els.pmInput?.click());
 
+      // changeで状態更新（ファイル名表示＆ボタン活性）
       els.txInput?.addEventListener("change", updateButton);
       els.lnInput?.addEventListener("change", updateButton);
+      els.pmInput?.addEventListener("change", updateButton);
 
+      // タブ
       document.querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=> onTabClick(t)));
 
-      await autoLoadCategory();       // GitHubからカテゴリ対照を自動ロード
+      // カテゴリマスタ自動ロード
+      await autoLoadCategory();
+
+      // 集計
       els.runBtn?.addEventListener("click", runImport);
 
+      // 初期表示
       updateButton();
     });
   </script>
