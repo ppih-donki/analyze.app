@@ -13,6 +13,7 @@
     .card { border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; background:#fff; }
     .btn { background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }
     .btn.secondary { background:#374151; }
+    .btn.ghost { background:#fff; color:var(--ink); border:1px solid var(--border); }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
     .btn-group { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
     label { font-weight:700; display:block; margin-bottom:6px; }
@@ -33,6 +34,9 @@
     .diag { margin-top:8px; padding:8px 10px; border:1px dashed var(--border); border-radius:8px; background:#fafafa; }
     .fname { font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:#fafafa; }
     .fileline { display:flex; align-items:center; gap:8px; }
+    .form-row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:12px; }
+    .form-row > div { display:flex; flex-direction:column; gap:6px; }
+    select, input[type="date"] { padding:8px 10px; border:1px solid var(--border); border-radius:8px; min-width:180px; }
   </style>
 </head>
 <body>
@@ -99,8 +103,40 @@
     </div>
   </div>
 
+  <!-- ベスレポ集計 -->
+  <div id="bestTab" class="tabcontent">
+    <div class="card">
+      <h2>ベスレポ集計</h2>
+      <div class="form-row">
+        <div>
+          <label>開始日</label>
+          <input type="date" id="bestStart" />
+        </div>
+        <div>
+          <label>終了日</label>
+          <input type="date" id="bestEnd" />
+        </div>
+        <div>
+          <label>ランキング軸</label>
+          <select id="bestMetric">
+            <option value="amt">売上順（明細金額合計）</option>
+            <option value="qty">点数順（販売数量合計）</option>
+            <option value="gp">粗利順（粗利合計）</option>
+            <option value="uniq">購買ユニークユーザー数順</option>
+            <option value="repeat">リピートユーザー数順（同一JANを2回以上）</option>
+          </select>
+        </div>
+        <div class="btn-group">
+          <button id="bestRun" class="btn">この条件で集計</button>
+          <button id="bestExport" class="btn ghost" disabled>CSVエクスポート</button>
+        </div>
+      </div>
+      <div id="bestInfo" class="muted" style="margin-bottom:8px;"></div>
+      <div id="bestTable"></div>
+    </div>
+  </div>
+
   <!-- 他タブはプレースホルダ -->
-  <div id="bestTab" class="tabcontent"><div class="card"><p class="muted">ベスレポ集計は後続で実装します。</p></div></div>
   <div id="timeTab" class="tabcontent"><div class="card"><p class="muted">時間帯集計は後続で実装します。</p></div></div>
   <div id="prodTab" class="tabcontent"><div class="card"><p class="muted">単品分析は後続で実装します。</p></div></div>
   <div id="rfmTab" class="tabcontent"><div class="card"><p class="muted">RFM分析は後続で実装します。</p></div></div>
@@ -166,18 +202,20 @@
       const d = new Date(t);
       return isNaN(d.getTime()) ? null : d;
     }
-    const fmtDate = (d)=> !d ? "-" : `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+    const fmtDate = (d)=> !d ? "-" : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+    const fmtDateSlash = (d)=> !d ? "-" : `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
     const minDate = (arr)=> arr.reduce((a,r)=>(!a||r.生成時間<a? r.生成時間:a), null);
     const maxDate = (arr)=> arr.reduce((a,r)=>(!a||r.生成時間>a? r.生成時間:a), null);
 
-    function renderTable(rows, elId, cols=null, max=50){
+    function renderTable(rows, elId, cols=null, max=null){
       const el = $(elId);
       if (!el) return;
       if (!rows || rows.length===0){ el.innerHTML = "<p class='muted'>データがありません。</p>"; return; }
       const headers = cols || Object.keys(rows[0]);
       let html = "<table><thead><tr>";
       headers.forEach(h=> html += `<th>${h}</th>`); html += "</tr></thead><tbody>";
-      rows.slice(0, max).forEach(r=>{
+      const view = max ? rows.slice(0, max) : rows;
+      view.forEach(r=>{
         html += "<tr>";
         headers.forEach(h=> html += `<td>${r[h] ?? ""}</td>`);
         html += "</tr>";
@@ -191,6 +229,10 @@
     let joined = [];
     let masterMap = null;   // JAN -> {商品名, 商品分類(小分類コード), POS原価}
     let categoryMap = null; // 小分類コード -> 小分類名
+
+    // ベスレポの保持（エクスポート用）
+    let lastBestList = null;
+    let lastBestMeta = null; // {start,end,label}
 
     // ===== カテゴリマスタ自動読込 =====
     async function autoLoadCategory(){
@@ -225,22 +267,19 @@
 
     // === ヘッダ探索（候補名 or 位置で決定） ===
     function findHeader(headers, candidates){
-      // headers は toNarrow 済み
       const normHeaders = headers.map(h=>keyNorm(h));
       for (const cand of candidates){
         const k = keyNorm(cand);
         const idx = normHeaders.indexOf(k);
-        if (idx !== -1) return headers[idx]; // 実ヘッダ名（半角化済み）を返す
+        if (idx !== -1) return headers[idx];
       }
       return null;
     }
 
-    // ===== マスタ構築（M列優先 + 列名ゆらぎ対応） =====
     function buildMasterMap(pm){
       const { data: pmRows, headers } = pm;
       const map = new Map();
 
-      // 列候補
       const codeCands = ["商品コード","商品cd","jan","janコード","バーコード","コード"];
       const catCands  = ["商品分類","小分類","小分類コード","分類"];
       const nameCands = ["商品名","商品名規格","品名","商品名称"];
@@ -251,8 +290,7 @@
       const nameHdr = findHeader(headers, nameCands);
       let   costHdr = findHeader(headers, costCands);
 
-      // 最終フォールバック：M列（0始まりで12番目）が存在すればそれを原価列にする
-      if (!costHdr && headers.length > 12) costHdr = headers[12];
+      if (!costHdr && headers.length > 12) costHdr = headers[12]; // M列
 
       for (const r of pmRows){
         const code = toNarrow(codeHdr ? r[codeHdr] : "").trim();
@@ -285,7 +323,6 @@
 
         const txRows = tx.data, lnRows = ln.data;
 
-        // 必須列チェック（ヘッダは toNarrow 済み）
         const needTx = new Set(["CGID","オーダーID","生成時間"].map(toNarrow));
         const needLn = new Set(["CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"].map(toNarrow));
         const hasAll=(rows,need)=> rows.length && [...need].every(c=> Object.prototype.hasOwnProperty.call(rows[0],c));
@@ -309,7 +346,6 @@
           r.商品価格 = toNumber(r.商品価格, 0);
         });
 
-        // 商品マスタ（任意）
         masterMap = null;
         let masterInfoText = "商品マスタ：未読込（原価=0扱い）";
         if (pm){
@@ -317,7 +353,6 @@
           masterInfoText = `商品マスタ：${pm.data.length.toLocaleString()}行（JANキー: ${masterMap.size.toLocaleString()}件）`;
         }
 
-        // JOIN
         const txMap = new Map();
         txRows.forEach(r => txMap.set(`${r.CGID}||${r.オーダーID}`, r));
 
@@ -368,7 +403,6 @@
           });
         }
 
-        // サマリー
         const uniqUsers = new Set(joined.map(x=>x.CGID)).size;
         const receipts  = new Set(joined.map(x=>x.オーダーID)).size;
         const totalQty  = joined.reduce((s,x)=> s + (x.商品数||0), 0);
@@ -377,7 +411,7 @@
         const dMin = minDate(joined), dMax = maxDate(joined);
 
         $("summary").innerHTML = `
-          <div class="metric">期間: <span class="kpi-strong">${fmtDate(dMin)} ~ ${fmtDate(dMax)}</span></div>
+          <div class="metric">期間: <span class="kpi-strong">${fmtDateSlash(dMin)} ~ ${fmtDateSlash(dMax)}</span></div>
           <div class="metric">ユニークユーザー数: <span class="kpi-strong">${uniqUsers.toLocaleString()}</span></div>
           <div class="metric">レシート件数: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
           <div class="metric">売上点数合計: <span class="kpi-strong">${totalQty.toLocaleString()}</span></div>
@@ -385,7 +419,14 @@
           <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
         `;
 
-        // マスタ適用状況の表示（診断）
+        // ベスレポの日付UIを初期化
+        if (dMin && dMax){
+          $("bestStart").min = $("bestEnd").min = fmtDate(dMin);
+          $("bestStart").max = $("bestEnd").max = fmtDate(dMax);
+          $("bestStart").value = fmtDate(dMin);
+          $("bestEnd").value   = fmtDate(dMax);
+        }
+
         const diag = $("masterDiag");
         const rate = joined.length ? Math.round((matched / joined.length) * 100) : 0;
         let topUnmatched = "";
@@ -396,7 +437,6 @@
         diag.style.display = "block";
         diag.innerHTML = `${masterInfoText} / 明細行: ${joined.length.toLocaleString()} / マスタ適用: ${matched.toLocaleString()}（${rate}%）${topUnmatched}`;
 
-        // プレビュー
         renderTable(
           joined,
           "preview",
@@ -413,6 +453,140 @@
       }
     }
 
+    // ===== ベスレポ集計 =====
+    function computeBestReport(){
+      if (!joined.length){
+        $("bestInfo").textContent = "先にCSVを取り込んでください。";
+        $("bestTable").innerHTML = "";
+        $("bestExport").disabled = true;
+        lastBestList = null; lastBestMeta = null;
+        return;
+      }
+      const s = $("bestStart").value;
+      const e = $("bestEnd").value;
+      const metric = $("bestMetric").value;
+
+      const sDate = s ? new Date(s+"T00:00:00") : null;
+      const eDate = e ? new Date(e+"T23:59:59") : null;
+
+      const rows = joined.filter(r=>{
+        if (!r.生成時間) return false;
+        if (sDate && r.生成時間 < sDate) return false;
+        if (eDate && r.生成時間 > eDate) return false;
+        return true;
+      });
+
+      const byJan = new Map();
+      for (const r of rows){
+        const k = r.JANコード || "-";
+        if (!byJan.has(k)){
+          byJan.set(k, {
+            JANコード: k,
+            商品名: r.商品名 || "",
+            小分類名: r.小分類名 || "",
+            売上金額合計: 0,
+            売上点数合計: 0,
+            粗利合計: 0,
+            ユーザーset: new Set(),
+            userCnt: new Map(),
+          });
+        }
+        const o = byJan.get(k);
+        o.売上金額合計 += (r.明細金額 || 0);
+        o.売上点数合計 += (r.商品数 || 0);
+        o.粗利合計   += (r.明細粗利 || 0);
+        if (r.CGID){
+          o.ユーザーset.add(r.CGID);
+          o.userCnt.set(r.CGID, (o.userCnt.get(r.CGID) || 0) + (r.商品数 || 0));
+        }
+      }
+
+      const list = [];
+      for (const o of byJan.values()){
+        const repeatUsers = Array.from(o.userCnt.values()).filter(cnt => cnt >= 2).length;
+        list.push({
+          JANコード: o.JANコード,
+          商品名: o.商品名,
+          小分類名: o.小分類名,
+          売上金額合計: Math.round(o.売上金額合計),
+          売上点数合計: Math.round(o.売上点数合計),
+          粗利合計: Math.round(o.粗利合計),
+          購買ユニークユーザー数: o.ユーザーset.size,
+          リピートユーザー数: repeatUsers
+        });
+      }
+
+      const keyMap = {
+        amt: "売上金額合計",
+        qty: "売上点数合計",
+        gp:  "粗利合計",
+        uniq:"購買ユニークユーザー数",
+        repeat:"リピートユーザー数",
+      };
+      const metricLabelMap = {
+        amt:"売上ベスレポ",
+        qty:"点数ベスレポ",
+        gp:"粗利ベスレポ",
+        uniq:"ユニークユーザー数ベスレポ",
+        repeat:"リピートベスレポ"
+      };
+      const sortKey = keyMap[metric] || "売上金額合計";
+      const label  = metricLabelMap[metric] || "売上ベスレポ";
+      list.sort((a,b)=> b[sortKey] - a[sortKey]);
+
+      $("bestInfo").textContent = `期間: ${s || "-"} ~ ${e || "-"} / 件数: ${list.length.toLocaleString()} / 並び順: ${$("bestMetric").selectedOptions[0].textContent}`;
+      renderTable(
+        list,
+        "bestTable",
+        ["JANコード","商品名","小分類名","売上金額合計","売上点数合計","粗利合計","購買ユニークユーザー数","リピートユーザー数"],
+        null
+      );
+
+      // エクスポート用に保持
+      lastBestList = list;
+      lastBestMeta = { start: s || "", end: e || "", label };
+      $("bestExport").disabled = !lastBestList || lastBestList.length===0;
+    }
+
+    // ===== ベスレポ CSVエクスポート =====
+    function exportBestCSV(){
+      if (!lastBestList || !lastBestList.length) return;
+      const headers = ["JANコード","商品名","小分類名","売上金額合計","売上点数合計","粗利合計","購買ユニークユーザー数","リピートユーザー数"];
+
+      // 1行目（ヘッダ）： yyyy/mm/dd ~ yyyy/mm/dd + レポート名
+      const ymd = (s)=> s ? s.replaceAll("-", "/") : "-";
+      const preface = `${ymd(lastBestMeta.start)} ~ ${ymd(lastBestMeta.end)} ${lastBestMeta.label}`;
+
+      // CSV生成
+      const lines = [];
+      lines.push(preface);
+      lines.push(headers.join(","));
+      for (const r of lastBestList){
+        const row = headers.map(h=>{
+          let v = r[h];
+          // CSVエスケープ
+          if (v === null || v === undefined) v = "";
+          v = String(v).replaceAll('"','""');
+          if (/[",\n]/.test(v)) v = `"${v}"`;
+          return v;
+        });
+        lines.push(row.join(","));
+      }
+      const csv = "\uFEFF" + lines.join("\n");
+
+      // ファイル名：YYYY-MM-DD_YYYY-MM-DD_レポート名.csv
+      const fn = `${lastBestMeta.start || "all"}_${lastBestMeta.end || "all"}_${lastBestMeta.label}.csv`;
+
+      const blob = new Blob([csv], {type:"text/csv;charset=utf-8;"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = fn;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
     function updateButton(){
       const ok = (els.txInput?.files?.length===1 && els.lnInput?.files?.length===1);
       if (els.runBtn) els.runBtn.disabled = !ok;
@@ -420,7 +594,6 @@
         els.status.className = "muted";
         els.status.textContent = ok ? "準備OK。取り込み＆集計できます。" : "CSVを2つ選択してください";
       }
-      // ファイル名表示
       $("fnameTx").textContent = els.txInput?.files?.[0]?.name || "未選択";
       $("fnameTx").classList.toggle("muted", !els.txInput?.files?.length);
       $("fnameLn").textContent = els.lnInput?.files?.[0]?.name || "未選択";
@@ -450,12 +623,11 @@
         catStatus: $("catStatus"),
       };
 
-      // ボタン→ファイル選択
+      // ファイルピッカー
       els.pickTx?.addEventListener("click", ()=> els.txInput?.click());
       els.pickLn?.addEventListener("click", ()=> els.lnInput?.click());
       els.pickPm?.addEventListener("click", ()=> els.pmInput?.click());
 
-      // changeで状態更新（ファイル名表示＆ボタン活性）
       els.txInput?.addEventListener("change", updateButton);
       els.lnInput?.addEventListener("change", updateButton);
       els.pmInput?.addEventListener("change", updateButton);
@@ -463,13 +635,16 @@
       // タブ
       document.querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=> onTabClick(t)));
 
-      // カテゴリマスタ自動ロード
+      // カテゴリマスタ
       await autoLoadCategory();
 
-      // 集計
+      // 取り込み
       els.runBtn?.addEventListener("click", runImport);
 
-      // 初期表示
+      // ベスレポ
+      $("bestRun")?.addEventListener("click", computeBestReport);
+      $("bestExport")?.addEventListener("click", exportBestCSV);
+
       updateButton();
     });
   </script>
