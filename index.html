@@ -15,12 +15,10 @@
     .full { grid-column:1 / -1; }
     .btn { background:var(--ink); color:#fff; padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }
     .btn.secondary { background:#374151; }
-    .btn.ghost { background:transparent; color:var(--ink); border:1px solid var(--border); }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
     .btn-group { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
     label { font-weight:700; display:block; margin-bottom:6px; }
-    input[type="file"], input[type="text"], select, input[type="number"] { padding:8px; border:1px solid var(--border); border-radius:8px; width:100%; }
-    input[type="text"]{ width:420px; max-width:100%; }
+    input[type="file"] { padding:8px; border:1px solid var(--border); border-radius:8px; width:100%; display:none; }
     table { width:100%; border-collapse:collapse; font-size:14px; }
     th, td { border-bottom:1px solid #eee; padding:6px 8px; text-align:left; }
     .muted { color:var(--muted); font-size:12px; }
@@ -46,31 +44,22 @@
     <div class="btn-group" style="margin-bottom:8px;">
       <button id="pickTx" class="btn">取引毎</button>
       <button id="pickLn" class="btn">商品毎</button>
-    </div>
-    <div class="btn-group" style="margin-bottom:8px;">
       <button id="pickPm" class="btn secondary">商品マスタ取り込み(csv)</button>
-    </div>
-
-    <!-- カテゴリ（小分類）マスタ読込：URL or txt -->
-    <div class="btn-group" style="margin-bottom:8px;">
-      <input id="catUrl" type="text" placeholder="カテゴリtxtのURL（raw.githubusercontent.com 推奨）" />
-      <button id="loadCatUrlBtn" class="btn ghost">URLから読込</button>
-      <button id="pickCat" class="btn ghost">カテゴリマスタ取込(txt)</button>
-      <span id="catStatus" class="muted">（任意）小分類コード⇄名称対照表</span>
+      <span id="status" class="muted" style="align-self:center;">CSVを2つ選択してください</span>
     </div>
 
     <!-- 実体の file input（非表示） -->
-    <input id="txFile" type="file" accept=".csv" style="display:none;" />
-    <input id="lnFile" type="file" accept=".csv" style="display:none;" />
-    <input id="pmFile" type="file" accept=".csv" style="display:none;" />
-    <input id="catFile" type="file" accept=".txt" style="display:none;" />
+    <input id="txFile" type="file" accept=".csv" />
+    <input id="lnFile" type="file" accept=".csv" />
+    <input id="pmFile" type="file" accept=".csv" />
 
     <div class="btn-group" style="margin-top:12px;">
       <button id="runBtn" class="btn" disabled>取り込み & 集計</button>
+      <span id="catStatus" class="muted">カテゴリマスタ：起動時にGitHubから自動読込</span>
     </div>
+
     <p class="muted" style="margin-top:8px;">
-      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code><br/>
-      カテゴリtxtは「<em>小分類コード[TAB]小分類名</em>」の行で構成（先頭行にヘッダがあってもOK）。
+      商品マスタCSVの列：<code>商品コード</code> / <code>商品分類</code> / <code>商品名</code>（<code>商品名規格</code>があれば代用）/ <code>POS原価</code>
     </p>
   </div>
 
@@ -107,20 +96,15 @@
   <div id="pairOnlyTab" class="tabcontent"><div class="card"><p class="muted">併売分析は後続で実装します。</p></div></div>
 
   <script>
+    /*** ========= 設定：カテゴリ（小分類）マスタの固定URL =========
+     * raw.githubusercontent.com の RAW URL を設定してください。
+     * 例）https://raw.githubusercontent.com/<org>/<repo>/main/data/category.txt
+     *************************************************************/
+    const CATEGORY_TXT_URL = "https://raw.githubusercontent.com/<your-account>/<your-repo>/main/data/category.txt";
+
     // ===== ユーティリティ =====
     const $ = (id) => document.getElementById(id);
-    const txInput = $("txFile"), lnInput = $("lnFile"), pmInput = $("pmFile"), catInput = $("catFile");
-    const runBtn  = $("runBtn"), statusEl= $("status");
-    const catStatus = $("catStatus");
-
-    // ボタン→ファイル選択
-    $("pickTx").addEventListener("click", ()=> txInput.click());
-    $("pickLn").addEventListener("click", ()=> lnInput.click());
-    $("pickPm").addEventListener("click", ()=> pmInput.click());
-    $("pickCat").addEventListener("click", ()=> catInput.click());
-    $("loadCatUrlBtn").addEventListener("click", loadCategoryFromUrl);
-
-    function normalizeHeader(h){ return String(h||"").replace(/\ufeff/g,"").trim(); }
+    const normalizeHeader = (h)=> String(h||"").replace(/\ufeff/g,"").trim();
 
     function parseCSVFile(file){
       return new Promise((resolve,reject)=>{
@@ -150,13 +134,13 @@
       const d = new Date(t);
       return isNaN(d.getTime()) ? null : d;
     }
-
-    function fmtDate(d){ if(!d) return "-"; const m=d.getMonth()+1, day=d.getDate(); return `${d.getFullYear()}/${m}/${day}`; }
-    function minDate(arr){ return arr.reduce((a,r)=>(!a||r.生成時間<a? r.生成時間:a), null); }
-    function maxDate(arr){ return arr.reduce((a,r)=>(!a||r.生成時間>a? r.生成時間:a), null); }
+    const fmtDate = (d)=> !d ? "-" : `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
+    const minDate = (arr)=> arr.reduce((a,r)=>(!a||r.生成時間<a? r.生成時間:a), null);
+    const maxDate = (arr)=> arr.reduce((a,r)=>(!a||r.生成時間>a? r.生成時間:a), null);
 
     function renderTable(rows, elId, cols=null, max=50){
       const el = $(elId);
+      if (!el) return;
       if (!rows || rows.length===0){ el.innerHTML = "<p class='muted'>データがありません。</p>"; return; }
       const headers = cols || Object.keys(rows[0]);
       let html = "<table><thead><tr>";
@@ -170,98 +154,70 @@
       el.innerHTML = html;
     }
 
-    function updateButton(){
-      const ok = (txInput.files.length===1 && lnInput.files.length===1);
-      runBtn.disabled = !ok;
-      statusEl.className = "muted";
-      statusEl.textContent = ok ? "準備OK。取り込み＆集計できます。" : "CSVを2つ選択してください";
-    }
-    txInput.addEventListener("change", updateButton);
-    lnInput.addEventListener("change", updateButton);
-    pmInput.addEventListener("change", ()=>{/* 任意 */});
-    catInput.addEventListener("change", async ()=>{
-      if (catInput.files.length===1) {
-        try {
-          const txt = await catInput.files[0].text();
-          loadCategoryTxt(txt);
-          catStatus.className="muted";
-          catStatus.textContent="カテゴリマスタ（txt）を読み込みました。";
-        } catch(e){
-          catStatus.className="error";
-          catStatus.textContent="カテゴリtxtの読み込みに失敗しました: " + (e?.message||e);
-        }
+    // ===== 状態 =====
+    let els = {};               // DOM参照（DOMContentLoaded後にセット）
+    let joined = [];            // JOIN済み明細
+    let masterMap = null;       // JAN -> {商品名, 商品分類(小分類コード), POS原価}
+    let categoryMap = null;     // 小分類コード -> 小分類名
+
+    // ===== カテゴリマスタの自動読込 =====
+    async function autoLoadCategory(){
+      const badge = els.catStatus;
+      if (!CATEGORY_TXT_URL){ if(badge){ badge.className="muted"; badge.textContent="カテゴリマスタ：URL未設定（未使用）"; } return; }
+      try{
+        const res = await fetch(CATEGORY_TXT_URL, { mode:"cors", cache:"no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        categoryMap = parseCategoryTxt(text);
+        if (badge){ badge.className="muted"; badge.textContent = "カテゴリマスタ：GitHubから読込済み"; }
+      }catch(e){
+        if (badge){ badge.className="error"; badge.textContent = "カテゴリtxtの取得に失敗: " + (e?.message||e); }
       }
-    });
+    }
 
-    // ===== カテゴリ対照（小分類） =====
-    let categoryMap = null; // Map<code, name>
-
-    function loadCategoryTxt(text){
+    function parseCategoryTxt(text){
       const lines = String(text).split(/\r?\n/);
       const map = new Map();
-      for (let i=0;i<lines.length;i++){
-        const raw = lines[i].trim();
+      for (const line of lines){
+        const raw = line.trim();
         if (!raw) continue;
         // タブ優先、なければ空白分割
         let parts = raw.split("\t");
         if (parts.length < 2) parts = raw.split(/\s+/);
         if (parts.length < 2) continue;
 
-        // ヘッダ（例: "小分類名" など）がある行はスキップ
-        const maybeCode = parts[0];
-        const maybeName = parts.slice(1).join(" ");
-        if (!/^\d{3,}$/.test(maybeCode)) continue; // 数字コードでなければスキップ
-
-        map.set(maybeCode, maybeName);
+        const code = parts[0];
+        const name = parts.slice(1).join(" ");
+        if (!/^\d{3,}$/.test(code)) continue; // 数字コードのみ受け付け
+        map.set(code, name);
       }
-      categoryMap = map;
+      return map;
     }
-
-    async function loadCategoryFromUrl(){
-      const url = $("catUrl").value.trim();
-      if (!url){ catStatus.className="error"; catStatus.textContent="URLを入力してください。"; return; }
-      try{
-        const res = await fetch(url, { mode: "cors" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        loadCategoryTxt(text);
-        catStatus.className="muted";
-        catStatus.textContent = "カテゴリマスタ（URL）を読み込みました。";
-      }catch(e){
-        catStatus.className="error";
-        catStatus.textContent = "カテゴリtxtの取得に失敗しました: " + (e?.message||e);
-      }
-    }
-
-    // ===== 状態 =====
-    let joined = [];   // JOIN済み明細
-    let masterMap = null; // JAN -> {商品名, 商品分類(小分類コード), POS原価}
 
     // ===== 取り込み & JOIN & サマリー =====
     async function runImport(){
-      runBtn.disabled = true;
-      statusEl.className = "muted";
-      statusEl.textContent = "取り込み中…";
+      const statusEl = els.status; const runBtn = els.runBtn;
+      if (runBtn) runBtn.disabled = true;
+      if (statusEl){ statusEl.className = "muted"; statusEl.textContent = "取り込み中…"; }
 
       try{
         const [txRows, lnRows] = await Promise.all([
-          parseCSVFile(txInput.files[0]),
-          parseCSVFile(lnInput.files[0])
+          parseCSVFile(els.txInput.files[0]),
+          parseCSVFile(els.lnInput.files[0])
         ]);
         let pmRows = [];
-        if (pmInput.files.length===1) pmRows = await parseCSVFile(pmInput.files[0]);
+        if (els.pmInput.files.length===1) pmRows = await parseCSVFile(els.pmInput.files[0]);
 
-        // 必須列（取引毎 / 商品毎）
+        // 必須列チェック
         const needTx = new Set(["CGID","オーダーID","生成時間"]);
         const needLn = new Set(["CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"]);
         const hasAll=(rows,need)=> rows.length && [...need].every(c=> Object.prototype.hasOwnProperty.call(rows[0],c));
         if(!hasAll(txRows,needTx) || !hasAll(lnRows,needLn)){
-          statusEl.className="error";
-          statusEl.textContent="必須列が不足（取引毎: CGID, オーダーID, 生成時間 / 商品毎: CGID, オーダーID, JANコード, 商品名, 商品数, 商品価格, 生成時間）";
+          if (statusEl){ statusEl.className="error"; statusEl.textContent="必須列が不足（取引毎: CGID, オーダーID, 生成時間 / 商品毎: CGID, オーダーID, JANコード, 商品名, 商品数, 商品価格, 生成時間）"; }
           return;
         }
 
-        // 整形（取引毎 / 商品毎）
+        // 整形
         txRows.forEach(r=>{
           r.CGID = String(r.CGID ?? "").trim();
           r.オーダーID = String(r.オーダーID ?? "").trim();
@@ -287,13 +243,13 @@
             const nm = String((r["商品名"] ?? r["商品名規格"] ?? "")).trim();
             masterMap.set(jan, {
               商品名: nm,
-              商品分類: String(r["商品分類"] ?? "").trim(), // ← 小分類コード想定
+              商品分類: String(r["商品分類"] ?? "").trim(), // 小分類コード
               POS原価: toNumber(r["POS原価"], 0)
             });
           });
         }
 
-        // JOIN（キー：CGID + オーダーID）…取引毎の生成時間を優先
+        // JOIN（キー：CGID + オーダーID）
         const txMap = new Map();
         txRows.forEach(r => txMap.set(`${r.CGID}||${r.オーダーID}`, r));
 
@@ -347,14 +303,16 @@
         const totalGp   = joined.reduce((s,x)=> s + (x.明細粗利||0), 0);
         const dMin = minDate(joined), dMax = maxDate(joined);
 
-        $("summary").innerHTML = `
-          <div class="metric">期間: <span class="kpi-strong">${fmtDate(dMin)} ~ ${fmtDate(dMax)}</span></div>
-          <div class="metric">ユニークユーザー数: <span class="kpi-strong">${uniqUsers.toLocaleString()}</span></div>
-          <div class="metric">レシート件数: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
-          <div class="metric">売上点数合計: <span class="kpi-strong">${totalQty.toLocaleString()}</span></div>
-          <div class="metric">売上金額合計: <span class="kpi-strong">${totalAmt.toLocaleString()}</span></div>
-          <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
-        `;
+        if ($("summary")){
+          $("summary").innerHTML = `
+            <div class="metric">期間: <span class="kpi-strong">${fmtDate(dMin)} ~ ${fmtDate(dMax)}</span></div>
+            <div class="metric">ユニークユーザー数: <span class="kpi-strong">${uniqUsers.toLocaleString()}</span></div>
+            <div class="metric">レシート件数: <span class="kpi-strong">${receipts.toLocaleString()}</span></div>
+            <div class="metric">売上点数合計: <span class="kpi-strong">${totalQty.toLocaleString()}</span></div>
+            <div class="metric">売上金額合計: <span class="kpi-strong">${totalAmt.toLocaleString()}</span></div>
+            <div class="metric">粗利合計: <span class="kpi-strong">${totalGp.toLocaleString()}</span></div>
+          `;
+        }
 
         // プレビュー（先頭50）
         renderTable(
@@ -364,28 +322,69 @@
           50
         );
 
-        statusEl.className = "muted";
-        statusEl.textContent = "完了！";
+        if (statusEl){ statusEl.className = "muted"; statusEl.textContent = "完了！"; }
       }catch(err){
         console.error(err);
-        statusEl.className = "error";
-        statusEl.textContent = "エラー: " + (err?.message || String(err));
+        if (statusEl){ statusEl.className = "error"; statusEl.textContent = "エラー: " + (err?.message || String(err)); }
       }finally{
-        runBtn.disabled = false;
+        if (runBtn) runBtn.disabled = false;
       }
     }
 
-    // イベント
-    $("runBtn").addEventListener("click", runImport);
+    function updateButton(){
+      const statusEl = els.status; const runBtn = els.runBtn;
+      const ok = (els.txInput?.files?.length===1 && els.lnInput?.files?.length===1);
+      if (runBtn) runBtn.disabled = !ok;
+      if (statusEl){
+        statusEl.className = "muted";
+        statusEl.textContent = ok ? "準備OK。取り込み＆集計できます。" : "CSVを2つ選択してください";
+      }
+    }
+
     function onTabClick(t){
       document.querySelectorAll(".tab,.tabcontent").forEach(x=>x.classList.remove("active"));
       t.classList.add("active");
-      $(t.dataset.tab).classList.add("active");
+      const pane = document.getElementById(t.dataset.tab);
+      if (pane) pane.classList.add("active");
     }
-    document.querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=> onTabClick(t)));
 
-    // 初期
-    (function init(){ updateButton(); })();
+    // ===== 初期化（DOMContentLoaded後） =====
+    document.addEventListener("DOMContentLoaded", async ()=>{
+      // DOM参照をまとめて取得
+      els = {
+        pickTx: $("pickTx"),
+        pickLn: $("pickLn"),
+        pickPm: $("pickPm"),
+        txInput: $("txFile"),
+        lnInput: $("lnFile"),
+        pmInput: $("pmFile"),
+        runBtn: $("runBtn"),
+        status: $("status"),
+        catStatus: $("catStatus"),
+      };
+
+      // ボタン → ファイル選択
+      els.pickTx?.addEventListener("click", ()=> els.txInput?.click());
+      els.pickLn?.addEventListener("click", ()=> els.lnInput?.click());
+      els.pickPm?.addEventListener("click", ()=> els.pmInput?.click());
+
+      // change イベント
+      els.txInput?.addEventListener("change", updateButton);
+      els.lnInput?.addEventListener("change", updateButton);
+      els.pmInput?.addEventListener("change", ()=>{/* 任意 */});
+
+      // タブ
+      document.querySelectorAll(".tab").forEach(t=> t.addEventListener("click", ()=> onTabClick(t)));
+
+      // カテゴリマスタ自動ロード
+      await autoLoadCategory();
+
+      // 集計実行
+      els.runBtn?.addEventListener("click", runImport);
+
+      // 初期ボタン状態
+      updateButton();
+    });
   </script>
 </body>
 </html>
