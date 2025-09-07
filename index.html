@@ -495,7 +495,7 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
         categoryMap = parseCategoryTxt(text);
-        if (badge){ badge.className="muted"; badge.textContent = "カテゴリマスタ：GitHubから読込済み"; }
+        if (badge){ badge.className="muted"; badge.textContent = "カテゴリマスタ：サーバーから取り込み済み"; }
       }catch(e){
         if (badge){ badge.className="error"; badge.textContent = "カテゴリtxtの取得に失敗: " + (e?.message||e); }
       }
