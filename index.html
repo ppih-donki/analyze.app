@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <title>小売ダッシュボード (完全クライアント)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- PyScript (Pyodide) -->
+  <!-- PyScript -->
   <link rel="stylesheet" href="https://pyscript.net/latest/pyscript.css" />
   <script defer src="https://pyscript.net/latest/pyscript.js"></script>
-  <!-- Plotly.js (グラフ表示用；CDN。データは送信されません) -->
+  <!-- Plotly (グラフ) -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <style>
     body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", Arial, sans-serif; margin: 16px; }
@@ -21,6 +21,7 @@
     table { width: 100%; border-collapse: collapse; }
     th, td { border-bottom: 1px solid #eee; padding: 6px 8px; text-align: left; }
     .muted { color: #6b7280; font-size: 12px; }
+    .error { color: #b91c1c; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -63,36 +64,28 @@
   <py-script>
 from js import document, FileReader, console, Plotly
 import pandas as pd
-import io, asyncio
+import io, asyncio, traceback
 
-# ==== ユーティリティ ====
-def read_csv_file(file_obj, encodings=("utf-8-sig","cp932","utf-8")):
-    """ブラウザのFileオブジェクトをPython側で読み、pandasへ"""
+# ---------- ユーティリティ ----------
+async def read_csv_file(file_obj):
+    """
+    ブラウザのFileを読み込んでpandasへ。
+    *重要*: 非同期関数 (async) にし、awaitを正しく扱う。
+    """
     reader = FileReader.new()
-    done = asyncio.get_event_loop().create_future()
+    fut = asyncio.get_event_loop().create_future()
 
     def onload(_):
-        done.set_result(reader.result)
+        fut.set_result(reader.result)
 
     reader.onload = onload
-    reader.readAsText(file_obj)
-
-    # 待機
-    js_text = await done
+    reader.readAsText(file_obj)         # 文字列として読む（encodingはブラウザ依存）
+    js_text = await fut                 # ここでawait
     text = str(js_text)
-
-    # エンコーディング順に試行（pandasは文字列IOからencoding未指定でもOKだが互換のため）
-    for enc in encodings:
-        try:
-            df = pd.read_csv(io.StringIO(text))
-            return df
-        except Exception as e:
-            continue
-    # 最後の手段
+    # pandasは文字列IOをそのまま受け取れる
     return pd.read_csv(io.StringIO(text))
 
 def normalize_columns(df):
-    # 余分な空白・全角→半角コロン等はサンプル前提で最小限
     def norm(s):
         s = str(s).replace("\ufeff","").strip()
         return s
@@ -100,51 +93,13 @@ def normalize_columns(df):
     return df
 
 def parse_datetime_series(s):
-    # "2025/8/5  21:53:13" のようにスペース2個でもOKにする
+    # "2025/8/5  21:53:13" のような複数スペースもOKにする
     ss = s.astype(str).str.strip().str.replace(r"\s+", " ", regex=True)
-    # 和暦や他形式は想定外、ISO系に寄せる
-    # 2025/8/5 21:53:13 等に対応
     return pd.to_datetime(ss, errors="coerce")
-
-def rfm_from_joined(df_join):
-    # 基準日はデータの最新  + 1日
-    ref = df_join["生成時間"].max() + pd.Timedelta(days=1)
-    rfm = df_join.groupby("CGID").agg(
-        Recency日=("生成時間", lambda x: (ref - x.max()).days),
-        Frequency回数=("オーダーID", "nunique"),
-        Monetary金額=("明細金額", "sum"),
-    ).reset_index()
-
-    # スコア（百分位を4分位）
-    def score(series, asc_good):
-        r = series.rank(method="average", pct=True)
-        if asc_good:
-            r = 1 - r
-        bins = [0.0, 0.25, 0.50, 0.75, 1.0]
-        labels = [1,2,3,4]
-        return pd.cut(r.fillna(0.0), bins=bins, labels=labels, include_lowest=True).astype(int)
-
-    rfm["Rスコア"] = score(rfm["Recency日"], asc_good=True)
-    rfm["Fスコア"] = score(rfm["Frequency回数"], asc_good=False)
-    rfm["Mスコア"] = score(rfm["Monetary金額"], asc_good=False)
-    rfm["RFMスコア"] = rfm["Rスコア"] + rfm["Fスコア"] + rfm["Mスコア"]
-
-    # 簡易セグメント
-    def seg(r,f,m,t):
-        if r>=3 and f>=3 and m>=3: return "ロイヤル"
-        if r>=3 and (f>=3 or m>=3): return "優良"
-        if r>=3 and f<=2 and m<=2: return "新規/育成"
-        if r==1 and (f>=3 or m>=3): return "離反懸念"
-        if r==1 and f<=2 and m<=2: return "休眠"
-        if t>=10: return "準ロイヤル"
-        if t>=7: return "一般"
-        return "要観察"
-    rfm["セグメント"] = [seg(r,f,m,t) for r,f,m,t in zip(rfm["Rスコア"], rfm["Fスコア"], rfm["Mスコア"], rfm["RFMスコア"])]
-    return rfm
 
 def render_table(df, el_id, max_rows=50):
     el = document.getElementById(el_id)
-    if df.empty:
+    if df is None or df.empty:
         el.innerHTML = "<p class='muted'>データがありません。</p>"
         return
     html = "<table><thead><tr>"
@@ -162,7 +117,40 @@ def render_seg_pie(rfm):
     layout = dict(title="セグメント構成（人数）", margin=dict(l=24,r=24,t=40,b=24))
     Plotly.newPlot("segPie", data, layout, {"displayModeBar": False})
 
-# ==== UI結線 ====
+def rfm_from_joined(df_join):
+    ref = df_join["生成時間"].max() + pd.Timedelta(days=1)
+    rfm = df_join.groupby("CGID").agg(
+        Recency日=("生成時間", lambda x: (ref - x.max()).days),
+        Frequency回数=("オーダーID", "nunique"),
+        Monetary金額=("明細金額", "sum"),
+    ).reset_index()
+
+    def score(series, asc_good):
+        r = series.rank(method="average", pct=True)
+        if asc_good: r = 1 - r
+        bins = [0.0, 0.25, 0.50, 0.75, 1.0]
+        labels = [1,2,3,4]
+        return pd.cut(r.fillna(0.0), bins=bins, labels=labels, include_lowest=True).astype(int)
+
+    rfm["Rスコア"] = score(rfm["Recency日"], True)
+    rfm["Fスコア"] = score(rfm["Frequency回数"], False)
+    rfm["Mスコア"] = score(rfm["Monetary金額"], False)
+    rfm["RFMスコア"] = rfm["Rスコア"] + rfm["Fスコア"] + rfm["Mスコア"]
+
+    def seg(r,f,m,t):
+        if r>=3 and f>=3 and m>=3: return "ロイヤル"
+        if r>=3 and (f>=3 or m>=3): return "優良"
+        if r>=3 and f<=2 and m<=2: return "新規/育成"
+        if r==1 and (f>=3 or m>=3): return "離反懸念"
+        if r==1 and f<=2 and m<=2: return "休眠"
+        if t>=10: return "準ロイヤル"
+        if t>=7: return "一般"
+        return "要観察"
+
+    rfm["セグメント"] = [seg(r,f,m,t) for r,f,m,t in zip(rfm["Rスコア"], rfm["Fスコア"], rfm["Mスコア"], rfm["RFMスコア"])]
+    return rfm
+
+# ---------- UI結線 ----------
 txInput = document.getElementById("txFile")
 lnInput = document.getElementById("lnFile")
 pmInput = document.getElementById("pmFile")
@@ -178,7 +166,8 @@ lnInput.addEventListener("change", update_button_state)
 
 async def on_run_click(evt):
     runBtn.disabled = True
-    status.innerText = "取り込み中..."
+    status.className = "muted"
+    status.innerText = "取り込み中…"
     try:
         # 1) 取込
         tx_df = await read_csv_file(txInput.files.item(0))
@@ -189,13 +178,14 @@ async def on_run_click(evt):
         # 必須列チェック
         need_tx = {"CGID","オーダーID","生成時間"}
         need_ln = {"CGID","オーダーID","JANコード","商品名","商品数","商品価格","生成時間"}
+        miss = []
         if not need_tx.issubset(set(tx_df.columns)):
-            missing = need_tx - set(tx_df.columns)
-            status.innerText = f"取引毎.csv の必須列が不足: {missing}"
-            return
+            miss.append(f"取引毎の不足: {need_tx - set(tx_df.columns)}")
         if not need_ln.issubset(set(ln_df.columns)):
-            missing = need_ln - set(ln_df.columns)
-            status.innerText = f"商品毎.csv の必須列が不足: {missing}"
+            miss.append(f"商品毎の不足: {need_ln - set(ln_df.columns)}")
+        if miss:
+            status.className = "error"
+            status.innerText = "必須列が不足しています → " + " / ".join(miss)
             return
 
         # 2) 型＆日付整形
@@ -214,21 +204,23 @@ async def on_run_click(evt):
             pm_df = await read_csv_file(pmInput.files.item(0))
             pm_df = normalize_columns(pm_df)
             # 想定: 商品コード, 商品分類, 商品名
-            colmap = { "商品コード":"JANコード", "商品名":"マスタ商品名", "商品分類":"商品分類" }
-            for src, dst in colmap.items():
-                if src in pm_df.columns:
-                    pm_df = pm_df.rename(columns={src: dst})
+            ren = {}
+            if "商品コード" in pm_df.columns: ren["商品コード"] = "JANコード"
+            if "商品名" in pm_df.columns:   ren["商品名"]     = "マスタ商品名"
+            if "商品分類" in pm_df.columns: ren["商品分類"]     = "商品分類"
+            pm_df = pm_df.rename(columns=ren)
             if "JANコード" in pm_df.columns:
                 pm_df["JANコード"] = pm_df["JANコード"].astype("string").str.strip()
-                ln_df = ln_df.merge(pm_df[["JANコード","マスタ商品名","商品分類"]], on="JANコード", how="left")
-                # マスタ名があればそちら優先
-                ln_df["商品名"] = ln_df["マスタ商品名"].combine_first(ln_df["商品名"])
-                ln_df.drop(columns=[c for c in ["マスタ商品名"] if c in ln_df.columns], inplace=True)
+                keep = [c for c in ["JANコード","マスタ商品名","商品分類"] if c in pm_df.columns]
+                ln_df = ln_df.merge(pm_df[keep], on="JANコード", how="left")
+                if "マスタ商品名" in ln_df.columns:
+                    ln_df["商品名"] = ln_df["マスタ商品名"].combine_first(ln_df["商品名"])
+                    ln_df.drop(columns=["マスタ商品名"], inplace=True)
 
         # 4) JOIN（CGID, オーダーID で）
-        joined = ln_df.merge(tx_df[["CGID","オーダーID","生成時間","オーダー金額"]] if "オーダー金額" in tx_df.columns else tx_df[["CGID","オーダーID","生成時間"]],
-                             on=["CGID","オーダーID"], how="inner", suffixes=("","_tx"))
-        # 明細金額 = 単価×数量
+        tx_keep = ["CGID","オーダーID","生成時間"]
+        if "オーダー金額" in tx_df.columns: tx_keep.append("オーダー金額")
+        joined = ln_df.merge(tx_df[tx_keep], on=["CGID","オーダーID"], how="inner")
         joined["明細金額"] = joined["商品価格"] * joined["商品数"]
 
         # 5) プレビュー
@@ -239,9 +231,12 @@ async def on_run_click(evt):
         render_table(rfm.sort_values("RFMスコア", ascending=False).head(50), "rfmTable", max_rows=50)
         render_seg_pie(rfm)
 
+        status.className = "muted"
         status.innerText = "完了！"
     except Exception as e:
-        status.innerText = f"エラー: {e}"
+        status.className = "error"
+        status.innerText = "エラー: " + str(e)
+        console.error(traceback.format_exc())
     finally:
         runBtn.disabled = False
 
