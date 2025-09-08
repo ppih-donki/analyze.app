@@ -17,7 +17,16 @@
     .btn:disabled { opacity:.5; cursor:not-allowed; }
     .btn-group { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
     label { font-weight:700; display:block; margin-bottom:6px; }
-    input[type="file"] { display:none; }
+    /* SAFER HIDE (iOS/WebView friendly): do not use display:none for file inputs */
+input[type="file"]{
+  position: fixed !important;
+  left: -9999px !important;
+  top: auto !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+}
     .muted { color:var(--muted); font-size:12px; }
     .error { color:#b91c1c; font-weight:700; white-space:pre-wrap; }
     .metrics { display:flex; gap:12px; flex-wrap:wrap; margin:8px 0; }
@@ -66,17 +75,17 @@
 
     <div class="btn-group" style="margin-bottom:6px;">
       <div class="fileline">
-        <button id="pickTx" class="btn">取引毎</button>
+        <button id="pickTx" class="btn" type="button">取引毎</button>
         <span id="fnameTx" class="fname muted">未選択</span>
       </div>
 
       <div class="fileline">
-        <button id="pickLn" class="btn">商品毎</button>
+        <button id="pickLn" class="btn" type="button">商品毎</button>
         <span id="fnameLn" class="fname muted">未選択</span>
       </div>
 
       <div class="fileline">
-        <button id="pickPm" class="btn secondary">商品マスタ取り込み(csv)</button>
+        <button id="pickPm" class="btn secondary" type="button">商品マスタ取り込み(csv)</button>
         <span id="fnamePm" class="fname muted">未選択</span>
     </div>
 
@@ -1608,9 +1617,9 @@
       };
 
       // ファイルピッカー
-      els.pickTx?.addEventListener("click", ()=> els.txInput?.click());
-      els.pickLn?.addEventListener("click", ()=> els.lnInput?.click());
-      els.pickPm?.addEventListener("click", ()=> els.pmInput?.click());
+      els.pickTx?.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); els.txInput?.click(); });
+      els.pickLn?.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); els.lnInput?.click(); });
+      els.pickPm?.addEventListener("click", (e)=>{ e.preventDefault(); e.stopPropagation(); els.pmInput?.click(); });
       els.txInput?.addEventListener("change", updateButton);
       els.lnInput?.addEventListener("change", updateButton);
       els.pmInput?.addEventListener("change", updateButton);
